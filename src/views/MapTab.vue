@@ -173,6 +173,8 @@ const routeMarkerB = shallowRef<maplibregl.Marker | null>(null);
 const userLocation = ref<{ lat: number, lon: number } | null>(null);
 const userLocationMarker = shallowRef<maplibregl.Marker | null>(null);
 const userIconPath = ref<string | null>(null);
+const userHeading = ref<number>(0);
+const positionWatchId = ref<string | null>(null);
 let debounceTimer: any = null;
 
 const readFileAsDataUrl = async (path: string): Promise<string | null> => {
@@ -501,12 +503,22 @@ const locateUser = async () => {
     }
     const pos = await Geolocation.getCurrentPosition({ enableHighAccuracy: true, timeout: 10000 });
     userLocation.value = { lat: pos.coords.latitude, lon: pos.coords.longitude };
+    if (pos.coords.heading !== null) userHeading.value = pos.coords.heading;
     routeA.value = { lat: pos.coords.latitude, lon: pos.coords.longitude };
     routeTextA.value = 'Моё местоположение';
     await setCurrentCity(pos.coords.latitude, pos.coords.longitude);
     map.value?.flyTo({ center: [pos.coords.longitude, pos.coords.latitude], zoom: 16 });
     updateUserMarker();
     updateRouteMarkers(); if (routeB.value) calculateRoute();
+
+    // Start watching position for movement and heading
+    if (positionWatchId.value) Geolocation.clearWatch({ id: positionWatchId.value });
+    positionWatchId.value = await Geolocation.watchPosition({ enableHighAccuracy: true }, (pos, err) => {
+      if (err || !pos) return;
+      userLocation.value = { lat: pos.coords.latitude, lon: pos.coords.longitude };
+      if (pos.coords.heading !== null) userHeading.value = pos.coords.heading;
+      updateUserMarker();
+    });
   } catch (e: any) { alert('Не удалось получить геоданные.'); }
 };
 
@@ -540,6 +552,8 @@ const createRouteMarkerElement = (type: 'A' | 'B') => {
 const createUserMarkerElement = () => {
   const el = document.createElement('div');
   el.className = 'user-marker';
+  el.style.transform = `rotate(${userHeading.value}deg)`;
+  el.style.transformOrigin = 'center';
   if (userIconPath.value) {
     const img = document.createElement('img');
     img.src = userIconPath.value;
@@ -568,8 +582,13 @@ const createUserMarkerElement = () => {
 
 const updateUserMarker = () => {
   const rawMap = map.value; if (!rawMap) return;
-  if (userLocationMarker.value) userLocationMarker.value.remove();
-  if (userLocation.value) userLocationMarker.value = new maplibregl.Marker({ element: createUserMarkerElement() }).setLngLat([userLocation.value.lon, userLocation.value.lat]).addTo(rawMap);
+  if (userLocationMarker.value) {
+    const element = userLocationMarker.value.getElement();
+    element.style.transform = `rotate(${userHeading.value}deg)`;
+    element.style.transformOrigin = 'center';
+  } else if (userLocation.value) {
+    userLocationMarker.value = new maplibregl.Marker({ element: createUserMarkerElement() }).setLngLat([userLocation.value.lon, userLocation.value.lat]).addTo(rawMap);
+  }
 };
 
 const updateRouteMarkers = () => {
@@ -585,6 +604,7 @@ const clearRoute = () => {
   if (rawMap && rawMap.getSource('route')) (rawMap.getSource('route') as any).setData({ type: 'FeatureCollection', features: [] });
   if (routeMarkerA.value) routeMarkerA.value.remove(); if (routeMarkerB.value) routeMarkerB.value.remove();
   routeMarkerA.value = null; routeMarkerB.value = null;
+  stopWatchingPosition();
 };
 
 const calculateRoute = async () => {
@@ -651,6 +671,13 @@ const removeUserIcon = async () => {
   await Preferences.remove({ key: 'user_icon_path' });
   userIconPath.value = null;
   updateUserMarker();
+};
+
+const stopWatchingPosition = () => {
+  if (positionWatchId.value) {
+    Geolocation.clearWatch({ id: positionWatchId.value });
+    positionWatchId.value = null;
+  }
 };
 
 onIonViewDidEnter(async () => {
@@ -731,5 +758,5 @@ onIonViewDidEnter(async () => {
 :deep(.route-marker) { width: 30px; height: 30px; border-radius: 50%; color: white; display: flex; align-items: center; justify-content: center; font-weight: bold; box-shadow: 0 4px 8px rgba(0, 0, 0, 0.4); border: 2px solid white; }
 :deep(.route-marker.a) { background-color: #3880ff; }
 :deep(.route-marker.b) { background-color: #eb445a; }
-:deep(.user-marker) { pointer-events: none; }
+:deep(.user-marker) { pointer-events: none; transition: transform 0.3s ease; }
 </style>

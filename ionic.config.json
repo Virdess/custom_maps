@@ -1,5 +1,5 @@
 {
-  "name": "./frontend",
+  "name": "Custom Map App",
   "integrations": {
     "capacitor": {}
   },
