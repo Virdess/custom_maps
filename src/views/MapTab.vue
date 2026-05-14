@@ -2,38 +2,43 @@
   <ion-page>
     <ion-header>
       <ion-toolbar>
-        <ion-title>Живая векторная карта</ion-title>
+        <ion-title>Векторная Карта (MapLibre)</ion-title>
       </ion-toolbar>
     </ion-header>
-    
+
     <ion-content :fullscreen="true">
       <div class="map-wrapper">
-        
+
         <!-- Панель навигации -->
         <div class="routing-panel">
           <div class="route-inputs">
             <div class="input-row">
               <span class="dot dot-a">A</span>
-              <input type="text" placeholder="Откуда (или геолокация)" v-model="routeTextA" @input="searchAddress($event, 'A')" @focus="activeSearchField = 'A'" />
+              <input type="text" placeholder="Откуда (или геолокация)" v-model="routeTextA"
+                @input="searchAddress($event, 'A')" @focus="activeSearchField = 'A'" />
             </div>
             <div class="input-row">
               <span class="dot dot-b">B</span>
-              <input type="text" placeholder="Куда (поиск или удержание)" v-model="routeTextB" @input="searchAddress($event, 'B')" @focus="activeSearchField = 'B'" />
+              <input type="text" placeholder="Куда (поиск или удержание)" v-model="routeTextB"
+                @input="searchAddress($event, 'B')" @focus="activeSearchField = 'B'" />
             </div>
-            <ion-button fill="clear" color="dark" class="swap-btn" @click="swapRoutes"><ion-icon :icon="swapVerticalOutline"></ion-icon></ion-button>
+            <ion-button fill="clear" color="dark" class="swap-btn" @click="swapRoutes"><ion-icon
+                :icon="swapVerticalOutline"></ion-icon></ion-button>
           </div>
           <div class="search-results" v-if="searchResults.length > 0">
-            <div class="search-item" v-for="res in searchResults" :key="res.place_id" @click="selectSearchResult(res)">{{ res.display_name }}</div>
+            <div class="search-item" v-for="res in searchResults" :key="res.place_id" @click="selectSearchResult(res)">
+              {{ res.display_name }}</div>
           </div>
-          <ion-button expand="block" size="small" color="danger" class="ion-margin-top" v-if="routeA || routeB || routePolyline" @click="clearRoute">Сбросить маршрут</ion-button>
+          <ion-button expand="block" size="small" color="danger" class="ion-margin-top" v-if="routeA || routeB"
+            @click="clearRoute">Сбросить маршрут</ion-button>
         </div>
 
         <div class="floating-status">
-          <ion-text color="warning" v-if="currentZoom < globalMinZoom"><small>Приблизьте карту</small></ion-text>
-          <ion-text color="primary" v-else-if="isLoading"><small>Загрузка слоёв...</small></ion-text>
-          <ion-text color="success" v-else><small>Объектов: {{ knownPOIs.size }} | Отрисовано: {{ drawnElements }}</small></ion-text>
+          <ion-text color="primary" v-if="isLoading"><small>Инициализация карты...</small></ion-text>
+          <ion-text color="success" v-else><small>Векторные данные загружены</small></ion-text>
         </div>
 
+        <!-- Контейнер для MapLibre -->
         <div id="map" class="map-container"></div>
 
         <ion-fab vertical="bottom" horizontal="end" slot="fixed" class="ion-margin">
@@ -41,25 +46,31 @@
         </ion-fab>
       </div>
 
-      <ion-modal :is-open="isPoiModalOpen" @didDismiss="isPoiModalOpen = false" :initial-breakpoint="0.45" :breakpoints="[0, 0.45, 0.75]">
+      <!-- Модалка POI -->
+      <ion-modal :is-open="isPoiModalOpen" @didDismiss="isPoiModalOpen = false" :initial-breakpoint="0.45"
+        :breakpoints="[0, 0.45, 0.75]">
         <ion-content class="ion-padding">
           <div v-if="selectedPOI" class="poi-menu">
             <h2 class="ion-no-margin ion-margin-bottom">{{ selectedPOI.name }}</h2>
             <ion-list lines="none">
               <ion-item>
                 <ion-label>
-                  <p>Категория: {{ categories.find(c => c.id === selectedPOI!.categoryId)?.name }}</p>
+                  <p>Категория: {{categories.find(c => c.id === selectedPOI!.categoryId)?.name}}</p>
                   <p v-if="selectedPOI.subCategory">Тип: <strong>{{ selectedPOI.subCategory }}</strong></p>
                 </ion-label>
               </ion-item>
             </ion-list>
-            <ion-button expand="block" color="success" class="ion-margin-top" @click="routeTo(selectedPOI.lat, selectedPOI.lon, selectedPOI.name)">Проложить маршрут сюда</ion-button>
-            <ion-button expand="block" fill="outline" class="ion-margin-top" @click="changeIconForPOI(selectedPOI.id)">Изменить иконку объекта</ion-button>
-            <ion-button v-if="loadedPoiIcons[selectedPOI.id]" expand="block" color="danger" fill="clear" class="ion-margin-top" @click="removeIconForPOI(selectedPOI.id)">Сбросить иконку</ion-button>
+            <ion-button expand="block" color="success" class="ion-margin-top"
+              @click="routeTo(selectedPOI.lat, selectedPOI.lon, selectedPOI.name)">Проложить маршрут сюда</ion-button>
+            <ion-button expand="block" fill="outline" class="ion-margin-top"
+              @click="changeIconForPOI(selectedPOI.id)">Изменить иконку объекта</ion-button>
+            <ion-button v-if="loadedIcons[selectedPOI.id]" expand="block" color="danger" fill="clear"
+              class="ion-margin-top" @click="removeIconForPOI(selectedPOI.id)">Сбросить иконку</ion-button>
           </div>
         </ion-content>
       </ion-modal>
     </ion-content>
+
   </ion-page>
 </template>
 
@@ -67,111 +78,78 @@
 import { IonPage, IonHeader, IonToolbar, IonTitle, IonContent, IonButton, IonText, IonModal, IonList, IonItem, IonLabel, IonFab, IonFabButton, IonIcon, onIonViewDidEnter } from '@ionic/vue';
 import { locateOutline, swapVerticalOutline } from 'ionicons/icons';
 import { ref, toRaw } from 'vue';
-import 'leaflet/dist/leaflet.css';
-import * as L from 'leaflet';
+import maplibregl from 'maplibre-gl';
+import 'maplibre-gl/dist/maplibre-gl.css';
 import { Camera, CameraResultType, CameraSource } from '@capacitor/camera';
 import { Preferences } from '@capacitor/preferences';
 import { Filesystem, Directory } from '@capacitor/filesystem';
 import { Geolocation } from '@capacitor/geolocation';
 
-const API_KEY_2GIS = 'rurbbn3446'; 
+const API_KEY_2GIS = 'rurbbn3446';
 
 interface POI {
-  id: string;
-  lat: number;
-  lon: number;
-  name: string;
-  categoryId: string;
-  subCategory?: string;
-  geometry?: { lat: number; lon: number }[];
+  id: string; lat: number; lon: number; name: string; categoryId: string; subCategory?: string;
 }
 
 const categories = [
   { id: 'map_background', name: 'Фон карты', color: '#e8e6e1', isSpecial: true },
   { id: 'route_line', name: 'Линия маршрута', color: '#3880ff', isSpecial: true },
-  
-  { id: 'water', name: 'Вода', color: '#aad3df', isArea: true, pane: 'waterPane', minZoom: 13 },
-  { id: 'landuse_green', name: 'Зелень', color: '#c8facc', isArea: true, pane: 'greenPane', minZoom: 13 },
-  { id: 'cemetery', name: 'Кладбища', color: '#aacaaf', isArea: true, pane: 'greenPane', minZoom: 14 },
-  { id: 'building', name: 'Здания', color: '#d3d3d3', minZoom: 15, isArea: true, pane: 'buildingPane' },
-  
-  { id: 'highway_motorway', name: 'Магистрали', color: '#e892a2', minZoom: 13, isLine: true, pane: 'highwayPane' },
-  { id: 'highway_primary', name: 'Основные дороги', color: '#f9b29c', minZoom: 13, isLine: true, pane: 'highwayPane' },
-  { id: 'highway_secondary', name: 'Второстепенные', color: '#f6fabb', minZoom: 14, isLine: true, pane: 'highwayPane' },
-  { id: 'highway_residential', name: 'Улицы', color: '#ffffff', minZoom: 15, isLine: true, pane: 'highwayPane' },
-  { id: 'highway_unclassified', name: 'Обычные дороги', color: '#e0e0e0', minZoom: 15, isLine: true, pane: 'highwayPane' },
-  { id: 'highway_pedestrian', name: 'Пешеходные пути', color: '#dddde8', minZoom: 15, isLine: true, pane: 'highwayPane' },
-  { id: 'highway_bridge', name: 'Мосты', color: '#a0a0a0', minZoom: 13, isLine: true, pane: 'highwayPane' },
-  
-  { id: 'office', name: 'Офисы', color: '#4682b4', osmKey: 'office', osmValue: 'any', minZoom: 15, icon: '🏢' },
-  { id: 'craft', name: 'Мастерские', color: '#708090', osmKey: 'craft', osmValue: 'any', minZoom: 15, icon: '🛠️' },
-  
-  { id: 'hospital', name: 'Больницы', color: '#eb445a', osmKey: 'amenity', osmValue: 'hospital', minZoom: 13, icon: '🏥' },
-  { id: 'clinic', name: 'Поликлиники', color: '#eb445a', osmKey: 'amenity', osmValue: 'clinic', minZoom: 14, icon: '⚕️' },
-  { id: 'pharmacy', name: 'Аптеки', color: '#eb445a', osmKey: 'amenity', osmValue: 'pharmacy', minZoom: 14, icon: '💊' },
-  { id: 'dentist', name: 'Стоматологии', color: '#eb445a', osmKey: 'amenity', osmValue: 'dentist', minZoom: 15, icon: '🦷' },
-  { id: 'veterinary', name: 'Ветеринарные', color: '#32cd32', osmKey: 'amenity', osmValue: 'veterinary', minZoom: 15, icon: '🐕' },
 
-  { id: 'supermarket', name: 'Супермаркеты', color: '#2dd36f', osmKey: 'shop', osmValue: 'supermarket', minZoom: 13, icon: '🛒' },
-  { id: 'mall', name: 'Торговые центры', color: '#8a2be2', osmKey: 'shop', osmValue: 'mall', minZoom: 13, icon: '🛍️' },
-  { id: 'convenience', name: 'Мини-маркеты', color: '#28ba62', osmKey: 'shop', osmValue: 'convenience', minZoom: 15, icon: '🏪' },
-  { id: 'clothes', name: 'Одежда и обувь', color: '#e024a3', osmKey: 'shop', osmValue: 'clothes', minZoom: 15, icon: '👗' },
-  { id: 'electronics', name: 'Электроника', color: '#4682b4', osmKey: 'shop', osmValue: 'electronics', minZoom: 15, icon: '💻' },
-  { id: 'beauty', name: 'Салоны красоты', color: '#ff69b4', osmKey: 'shop', osmValue: 'beauty', minZoom: 15, icon: '💇‍♀️' },
-  { id: 'shop_other', name: 'Прочие магазины', color: '#2dd36f', osmKey: 'shop', osmValue: 'any', minZoom: 15, icon: '🏬' },
+  // Геометрия
+  { id: 'water', name: 'Вода', color: '#aad3df', isArea: true, omtLayer: 'water' },
+  { id: 'landuse_green', name: 'Зелень', color: '#c8facc', isArea: true, omtLayer: 'landcover', omtClass: ['wood', 'grass'] },
+  { id: 'park', name: 'Парки (зоны)', color: '#aacaaf', isArea: true, omtLayer: 'park' },
+  { id: 'building', name: 'Здания', color: '#d3d3d3', isArea: true, omtLayer: 'building' },
 
-  { id: 'restaurant', name: 'Рестораны', color: '#ff4961', osmKey: 'amenity', osmValue: 'restaurant', minZoom: 14, icon: '🍽️' },
-  { id: 'cafe', name: 'Кафе', color: '#ffc409', osmKey: 'amenity', osmValue: 'cafe', minZoom: 15, icon: '☕' },
-  { id: 'fast_food', name: 'Фастфуд', color: '#ff8c00', osmKey: 'amenity', osmValue: 'fast_food', minZoom: 15, icon: '🍔' },
+  // Дороги 
+  { id: 'highway_motorway', name: 'Магистрали', color: '#e892a2', isLine: true, omtClass: ['motorway'] },
+  { id: 'highway_primary', name: 'Основные дороги', color: '#f9b29c', isLine: true, omtClass: ['primary', 'trunk'] },
+  { id: 'highway_secondary', name: 'Второстепенные', color: '#f6fabb', isLine: true, omtClass: ['secondary', 'tertiary'] },
+  { id: 'highway_residential', name: 'Улицы', color: '#ffffff', isLine: true, omtClass: ['street', 'street_limited'] },
+  { id: 'highway_unclassified', name: 'Обычные дороги', color: '#e0e0e0', isLine: true, omtClass: ['minor', 'service', 'track'] },
+  { id: 'highway_pedestrian', name: 'Пешеходные пути', color: '#dddde8', isLine: true, omtClass: ['path', 'pedestrian'] },
+  { id: 'highway_bridge', name: 'Мосты', color: '#a0a0a0', isLine: true, isBridge: true }, 
 
-  { id: 'bus_stop', name: 'Остановки', color: '#3880ff', osmKey: 'highway', osmValue: 'bus_stop', minZoom: 15, icon: '🚏' },
-  { id: 'parking', name: 'Парковки', color: '#708090', osmKey: 'amenity', osmValue: 'parking', minZoom: 15, icon: '🅿️' },
-  { id: 'fuel', name: 'АЗС', color: '#ff8c00', osmKey: 'amenity', osmValue: 'fuel', minZoom: 14, icon: '⛽' },
-  { id: 'car_wash', name: 'Автомойки', color: '#3dc2ff', osmKey: 'amenity', osmValue: 'car_wash', minZoom: 15, icon: '🧽' },
-
-  { id: 'bank', name: 'Банки', color: '#3880ff', osmKey: 'amenity', osmValue: 'bank', minZoom: 14, icon: '🏦' },
-  { id: 'atm', name: 'Банкоматы', color: '#3dc2ff', osmKey: 'amenity', osmValue: 'atm', minZoom: 15, icon: '🏧' },
-  { id: 'school', name: 'Учебные заведения', color: '#1e90ff', osmKey: 'amenity', osmValue: 'school', minZoom: 14, icon: '🏫' },
-  { id: 'post_office', name: 'Почта', color: '#3dc2ff', osmKey: 'amenity', osmValue: 'post_office', minZoom: 15, icon: '📮' },
-
-  { id: 'park_poi', name: 'Метки парков', color: '#2dd36f', osmKey: 'leisure', osmValue: 'park', minZoom: 14, icon: '🌲' },
-  { id: 'hotel', name: 'Отели', color: '#ffb6c1', osmKey: 'tourism', osmValue: 'hotel', minZoom: 14, icon: '🏨' },
-  { id: 'gym', name: 'Спортзалы', color: '#32cd32', osmKey: 'leisure', osmValue: 'fitness_centre', minZoom: 14, icon: '🏋️' },
-
-  { id: 'other', name: 'Прочие', color: '#8c8c8c', osmKey: 'any', osmValue: 'any', minZoom: 16, icon: '📍' }
+  // POI
+  { id: 'hospital', name: 'Больницы', color: '#eb445a', omtClass: ['hospital'], icon: '🏥' },
+  { id: 'pharmacy', name: 'Аптеки', color: '#eb445a', omtClass: ['pharmacy'], icon: '💊' },
+  { id: 'supermarket', name: 'Супермаркеты', color: '#2dd36f', omtClass: ['grocery', 'supermarket'], icon: '🛒' },
+  { id: 'clothes', name: 'Одежда', color: '#e024a3', omtClass: ['clothing_store'], icon: '👗' },
+  { id: 'restaurant', name: 'Рестораны', color: '#ff4961', omtClass: ['restaurant'], icon: '🍽️' },
+  { id: 'cafe', name: 'Кафе', color: '#ffc409', omtClass: ['cafe'], icon: '☕' },
+  { id: 'fast_food', name: 'Фастфуд', color: '#ff8c00', omtClass: ['fast_food'], icon: '🍔' },
+  { id: 'bus_stop', name: 'Остановки', color: '#3880ff', omtClass: ['bus_station'], icon: '🚏' },
+  { id: 'parking', name: 'Парковки', color: '#708090', omtClass: ['parking'], icon: '🅿️' },
+  { id: 'fuel', name: 'АЗС', color: '#ff8c00', omtClass: ['gas'], icon: '⛽' },
+  { id: 'bank', name: 'Банки', color: '#3880ff', omtClass: ['bank'], icon: '🏦' },
+  { id: 'school', name: 'Учебные заведения', color: '#1e90ff', omtClass: ['school', 'college', 'university'], icon: '🏫' },
+  { id: 'hotel', name: 'Отели', color: '#ffb6c1', omtClass: ['lodging'], icon: '🏨' },
+  { id: 'other', name: 'Прочие', color: '#8c8c8c', omtClass: ['default'], icon: '📍' }
 ];
 
-const map = ref<L.Map | null>(null);
-const markersGroup = ref<L.LayerGroup | null>(null);
-const isLoading = ref(false);
+const map = ref<maplibregl.Map | null>(null);
+const isLoading = ref(true);
 const isPoiModalOpen = ref(false);
 const selectedPOI = ref<POI | null>(null);
-const currentZoom = ref(15);
-const globalMinZoom = 13;
-const drawnElements = ref(0);
 
-let fetchTimer: any = null;
-let abortController: AbortController | null = null;
-const knownPOIs = ref<Map<string, POI>>(new Map());
-const iconCache = new Map<string, L.DivIcon>();
-
+// Настройки
+const globalIs3D = ref(true);
 const loadedIcons = ref<Record<string, string>>({});
-const loadedPoiIcons = ref<Record<string, string>>({});
 const loadedCategoryColors = ref<Record<string, string>>({});
 const loadedCategorySizes = ref<Record<string, number>>({});
 const loadedCategoryOpacities = ref<Record<string, number>>({});
 const loadedCategoryBgStates = ref<Record<string, boolean>>({});
 const loadedCategoryLineStyles = ref<Record<string, string>>({});
 
-const routeA = ref<{lat: number, lon: number} | null>(null);
-const routeB = ref<{lat: number, lon: number} | null>(null);
+// Навигация
+const routeA = ref<{ lat: number, lon: number } | null>(null);
+const routeB = ref<{ lat: number, lon: number } | null>(null);
 const routeTextA = ref('');
 const routeTextB = ref('');
 const searchResults = ref<any[]>([]);
 const activeSearchField = ref<'A' | 'B' | null>(null);
-const routePolyline = ref<L.Polyline | null>(null);
-const markerA = ref<L.Marker | null>(null);
-const markerB = ref<L.Marker | null>(null);
+const routeMarkerA = ref<maplibregl.Marker | null>(null);
+const routeMarkerB = ref<maplibregl.Marker | null>(null);
 let debounceTimer: any = null;
 
 const readFileAsDataUrl = async (path: string): Promise<string | null> => {
@@ -182,6 +160,9 @@ const readFileAsDataUrl = async (path: string): Promise<string | null> => {
 };
 
 const loadStorageData = async () => {
+  const { value: is3D } = await Preferences.get({ key: `global_is_3d` });
+  globalIs3D.value = is3D !== 'false';
+
   for (const cat of categories) {
     if (!cat.isSpecial) {
       const { value: p } = await Preferences.get({ key: `icon_path_${cat.id}` });
@@ -191,47 +172,171 @@ const loadStorageData = async () => {
     const { value: s } = await Preferences.get({ key: `cat_size_${cat.id}` }); if (s) loadedCategorySizes.value[cat.id] = parseInt(s, 10);
     const { value: o } = await Preferences.get({ key: `cat_opacity_${cat.id}` }); if (o) loadedCategoryOpacities.value[cat.id] = parseInt(o, 10);
     const { value: bg } = await Preferences.get({ key: `cat_bg_${cat.id}` }); if (bg) loadedCategoryBgStates.value[cat.id] = bg === 'true';
-    
-    // Загрузка стиля линии (dashed, dotted, solid)
-    const { value: ls } = await Preferences.get({ key: `cat_linestyle_${cat.id}` }); 
-    if (ls) loadedCategoryLineStyles.value[cat.id] = ls;
-    else loadedCategoryLineStyles.value[cat.id] = 'solid';
+    const { value: ls } = await Preferences.get({ key: `cat_linestyle_${cat.id}` });
+    if (ls) loadedCategoryLineStyles.value[cat.id] = ls; else loadedCategoryLineStyles.value[cat.id] = 'solid';
   }
-  const { keys } = await Preferences.keys();
-  for (const key of keys) {
-    if (key.startsWith('icon_path_poi_')) {
-      const { value } = await Preferences.get({ key });
-      if (value) { const data = await readFileAsDataUrl(value); if (data) loadedPoiIcons.value[key.replace('icon_path_poi_', '')] = data; }
+};
+
+const getLinePaint = (id: string) => {
+  const color = loadedCategoryColors.value[id] || categories.find(c => c.id === id)?.color || '#000000';
+  const opacity = (loadedCategoryOpacities.value[id] ?? 100) / 100;
+  const width = (loadedCategorySizes.value[id] || 40) / 10;
+  const style = loadedCategoryLineStyles.value[id] || 'solid';
+
+  const paintObj: any = { "line-color": color, "line-width": width, "line-opacity": opacity };
+  if (style === 'dashed') paintObj["line-dasharray"] = [2, 2];
+  else if (style === 'dotted') paintObj["line-dasharray"] = [0.5, 2];
+  return paintObj;
+};
+
+const generateMapStyle = (): any => {
+  const getCol = (id: string) => loadedCategoryColors.value[id] || categories.find(c => c.id === id)?.color || '#000000';
+  const getOp = (id: string) => (loadedCategoryOpacities.value[id] ?? 100) / 100;
+
+  const style: any = {
+    version: 8,
+    name: "Custom Vector Style",
+    glyphs: "https://tiles.openfreemap.org/fonts/{fontstack}/{range}.pbf",
+    sprite: "https://tiles.openfreemap.org/sprites/osm-liberty",
+    sources: { openfreemap: { type: "vector", url: "https://tiles.openfreemap.org/planet/planet.json" } },
+    layers: [
+      { id: "background", type: "background", paint: { "background-color": getCol('map_background') } },
+      { id: "water", type: "fill", source: "openfreemap", "source-layer": "water", paint: { "fill-color": getCol('water'), "fill-opacity": getOp('water') } },
+      { id: "landcover_green", type: "fill", source: "openfreemap", "source-layer": "landcover", filter: ["in", "class", "wood", "grass"], paint: { "fill-color": getCol('landuse_green'), "fill-opacity": getOp('landuse_green') } },
+      { id: "park", type: "fill", source: "openfreemap", "source-layer": "park", paint: { "fill-color": getCol('park'), "fill-opacity": getOp('park') } },
+      
+      { id: "road_pedestrian", type: "line", source: "openfreemap", "source-layer": "transportation", filter: ["in", "class", "path", "pedestrian"], paint: getLinePaint('highway_pedestrian') },
+      { id: "road_unclassified", type: "line", source: "openfreemap", "source-layer": "transportation", filter: ["in", "class", "service", "track", "minor"], paint: getLinePaint('highway_unclassified') },
+      { id: "road_residential", type: "line", source: "openfreemap", "source-layer": "transportation", filter: ["in", "class", "street", "street_limited"], paint: getLinePaint('highway_residential') },
+      { id: "road_secondary", type: "line", source: "openfreemap", "source-layer": "transportation", filter: ["in", "class", "secondary", "tertiary"], paint: getLinePaint('highway_secondary') },
+      { id: "road_primary", type: "line", source: "openfreemap", "source-layer": "transportation", filter: ["in", "class", "primary", "trunk"], paint: getLinePaint('highway_primary') },
+      { id: "road_motorway", type: "line", source: "openfreemap", "source-layer": "transportation", filter: ["==", "class", "motorway"], paint: getLinePaint('highway_motorway') }
+    ]
+  };
+
+  // Если глобально включен 3D режим, добавляем слой fill-extrusion для зданий. 
+  // Иначе добавляем обычный плоский fill.
+  if (globalIs3D.value) {
+    style.layers.push({
+      id: "building-3d", type: "fill-extrusion", source: "openfreemap", "source-layer": "building",
+      paint: {
+        "fill-extrusion-color": getCol('building'),
+        "fill-extrusion-height": ["interpolate", ["linear"], ["zoom"], 14, 0, 15, ["get", "render_height"]],
+        "fill-extrusion-base": ["interpolate", ["linear"], ["zoom"], 14, 0, 15, ["get", "render_min_height"]],
+        "fill-extrusion-opacity": getOp('building')
+      }
+    });
+  } else {
+    style.layers.push({
+      id: "building-flat", type: "fill", source: "openfreemap", "source-layer": "building",
+      paint: {
+        "fill-color": getCol('building'),
+        "fill-opacity": getOp('building')
+      }
+    });
+  }
+
+  const poiCategories = categories.filter(c => !c.isArea && !c.isLine && !c.isSpecial);
+  poiCategories.forEach(cat => {
+    const classFilter = cat.omtClass ? ["in", "class", ...cat.omtClass] : ["has", "class"];
+    const baseScale = (loadedCategorySizes.value[cat.id] || 40) / 128;
+
+    style.layers.push({
+      id: `poi_${cat.id}`, type: "symbol", source: "openfreemap", "source-layer": "poi", minzoom: 14, filter: classFilter,
+      layout: {
+        "icon-image": `icon_${cat.id}`, 
+        "icon-size": baseScale, 
+        "icon-allow-overlap": false,
+        "text-field": "{name}", "text-font": ["Metropolis Regular"], "text-offset": [0, 1.5], "text-anchor": "top", "text-size": 12
+      },
+      paint: {
+        "icon-opacity": (loadedCategoryOpacities.value[cat.id] ?? 100) / 100,
+        "text-color": loadedCategoryColors.value[cat.id] || cat.color,
+        "text-halo-color": "#ffffff", "text-halo-width": 1
+      }
+    });
+  });
+
+  return style;
+};
+
+const getMapboxIcon = async (cat: any): Promise<HTMLImageElement | null> => {
+  return new Promise((resolve) => {
+    const size = 128; 
+    const canvas = document.createElement('canvas');
+    canvas.width = size; canvas.height = size;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return resolve(null);
+
+    const color = loadedCategoryColors.value[cat.id] || cat.color;
+    const hasBg = loadedCategoryBgStates.value[cat.id] ?? true;
+    const customImgData = loadedIcons.value[cat.id]; 
+
+    const renderTextFallback = () => {
+      const iconChar = cat.icon || cat.name[0];
+      if (hasBg) {
+        ctx.fillStyle = color;
+        ctx.beginPath(); ctx.roundRect(8, 8, size-16, size-16, 24); ctx.fill();
+        ctx.strokeStyle = 'white'; ctx.lineWidth = 6; ctx.stroke();
+        ctx.fillStyle = 'white';
+      } else {
+        ctx.fillStyle = color;
+      }
+      ctx.font = `bold ${size/2}px sans-serif`;
+      ctx.textAlign = "center"; ctx.textBaseline = "middle";
+      ctx.fillText(iconChar, size/2, size/2 + 8);
+      
+      const out = new Image(); out.onload = () => resolve(out); out.src = canvas.toDataURL();
+    };
+
+    if (customImgData) {
+      const img = new Image();
+      img.onload = () => {
+        if (hasBg) {
+          ctx.fillStyle = color;
+          ctx.beginPath(); ctx.roundRect(8, 8, size-16, size-16, 24); ctx.fill();
+          ctx.save();
+          ctx.beginPath(); ctx.roundRect(14, 14, size-28, size-28, 18); ctx.clip();
+          ctx.drawImage(img, 14, 14, size-28, size-28);
+          ctx.restore();
+          ctx.strokeStyle = 'white'; ctx.lineWidth = 6; ctx.stroke();
+        } else {
+          ctx.drawImage(img, 0, 0, size, size);
+        }
+        const out = new Image(); out.onload = () => resolve(out); out.src = canvas.toDataURL();
+      };
+      img.onerror = () => renderTextFallback();
+      img.src = customImgData;
+    } else {
+      renderTextFallback();
     }
+  });
+};
+
+const initMapLibreImages = async (rawMap: maplibregl.Map) => {
+  const poiCategories = categories.filter(c => !c.isArea && !c.isLine && !c.isSpecial);
+  for (const cat of poiCategories) {
+    const img = await getMapboxIcon(cat);
+    if (!img) continue;
+    
+    const iconId = `icon_${cat.id}`;
+    if (rawMap.hasImage(iconId)) rawMap.updateImage(iconId, img);
+    else rawMap.addImage(iconId, img);
   }
-
-  const bgColor = loadedCategoryColors.value['map_background'] || '#e8e6e1';
-  const mapDiv = document.getElementById('map');
-  if (mapDiv) mapDiv.style.backgroundColor = bgColor;
-  
-  iconCache.clear(); 
 };
 
-// Функция конвертации строкового стиля в SVG dashArray
-const getDashArrayForStyle = (style: string, weight: number): string => {
-  if (style === 'dashed') return `${weight * 2}, ${weight * 2}`;
-  if (style === 'dotted') return `1, ${weight * 2}`;
-  return ''; // solid
-};
-
+// --- МАРШРУТЫ И НАВИГАЦИЯ ---
 const searchAddress = (evt: any, field: 'A' | 'B') => {
   const q = evt.target.value; activeSearchField.value = field; clearTimeout(debounceTimer);
   if (q.length < 3) { searchResults.value = []; return; }
-  debounceTimer = setTimeout(async () => { 
-    try { 
+  debounceTimer = setTimeout(async () => {
+    try {
       const res = await fetch(`https://catalog.api.2gis.com/3.0/items/geocode?q=${encodeURIComponent(q)}&key=${API_KEY_2GIS}&fields=items.point`);
-      const data = await res.json(); 
+      const data = await res.json();
       if (data.result && data.result.items) {
-        searchResults.value = data.result.items.map((i: any) => ({
-          place_id: i.id, display_name: i.full_name || i.name, lat: i.point.lat, lon: i.point.lon
-        }));
+        searchResults.value = data.result.items.map((i: any) => ({ place_id: i.id, display_name: i.full_name || i.name, lat: i.point.lat, lon: i.point.lon }));
       } else searchResults.value = [];
-    } catch(e) {} 
+    } catch (e) { }
   }, 400);
 };
 
@@ -240,17 +345,16 @@ const locateUser = async () => {
     const pos = await Geolocation.getCurrentPosition();
     routeA.value = { lat: pos.coords.latitude, lon: pos.coords.longitude };
     routeTextA.value = 'Моё местоположение';
-    toRaw(map.value)?.setView([pos.coords.latitude, pos.coords.longitude], 16);
-    updateRouteMarkers();
-    if (routeB.value) calculateRoute();
-  } catch (e) {}
+    toRaw(map.value)?.flyTo({ center: [pos.coords.longitude, pos.coords.latitude], zoom: 16 });
+    updateRouteMarkers(); if (routeB.value) calculateRoute();
+  } catch (e) { }
 };
 
 const selectSearchResult = (item: any) => {
   if (activeSearchField.value === 'A') { routeA.value = { lat: parseFloat(item.lat), lon: parseFloat(item.lon) }; routeTextA.value = item.display_name.split(',')[0]; }
   else { routeB.value = { lat: parseFloat(item.lat), lon: parseFloat(item.lon) }; routeTextB.value = item.display_name.split(',')[0]; }
-  searchResults.value = []; updateRouteMarkers(); 
-  toRaw(map.value)?.setView([parseFloat(item.lat), parseFloat(item.lon)], 16);
+  searchResults.value = []; updateRouteMarkers();
+  toRaw(map.value)?.flyTo({ center: [parseFloat(item.lon), parseFloat(item.lat)], zoom: 16 });
   if (routeA.value && routeB.value) calculateRoute();
 };
 
@@ -260,43 +364,43 @@ const swapRoutes = () => {
   updateRouteMarkers(); if (routeA.value && routeB.value) calculateRoute();
 };
 
+const createRouteMarkerElement = (type: 'A' | 'B') => {
+  const el = document.createElement('div'); el.className = `route-marker ${type.toLowerCase()}`; el.innerText = type; return el;
+};
+
 const updateRouteMarkers = () => {
   const rawMap = toRaw(map.value); if (!rawMap) return;
-  if (markerA.value) rawMap.removeLayer(toRaw(markerA.value)); if (markerB.value) rawMap.removeLayer(toRaw(markerB.value));
-  if (routeA.value) markerA.value = L.marker([routeA.value.lat, routeA.value.lon], { icon: L.divIcon({ html: '<div class="route-marker a">A</div>', className: 'clear-leaflet-style' }), pane: 'poiPane' }).addTo(rawMap);
-  if (routeB.value) markerB.value = L.marker([routeB.value.lat, routeB.value.lon], { icon: L.divIcon({ html: '<div class="route-marker b">B</div>', className: 'clear-leaflet-style' }), pane: 'poiPane' }).addTo(rawMap);
+  if (routeMarkerA.value) routeMarkerA.value.remove(); if (routeMarkerB.value) routeMarkerB.value.remove();
+  if (routeA.value) routeMarkerA.value = new maplibregl.Marker({ element: createRouteMarkerElement('A') }).setLngLat([routeA.value.lon, routeA.value.lat]).addTo(rawMap);
+  if (routeB.value) routeMarkerB.value = new maplibregl.Marker({ element: createRouteMarkerElement('B') }).setLngLat([routeB.value.lon, routeB.value.lat]).addTo(rawMap);
 };
 
 const clearRoute = () => {
   routeA.value = null; routeB.value = null; routeTextA.value = ''; routeTextB.value = ''; searchResults.value = [];
   const rawMap = toRaw(map.value);
-  if (rawMap && routePolyline.value) rawMap.removeLayer(toRaw(routePolyline.value));
-  if (rawMap && markerA.value) rawMap.removeLayer(toRaw(markerA.value));
-  if (rawMap && markerB.value) rawMap.removeLayer(toRaw(markerB.value));
-  routePolyline.value = null; markerA.value = null; markerB.value = null;
+  if (rawMap && rawMap.getSource('route')) (rawMap.getSource('route') as any).setData({ type: 'FeatureCollection', features: [] });
+  if (routeMarkerA.value) routeMarkerA.value.remove(); if (routeMarkerB.value) routeMarkerB.value.remove();
+  routeMarkerA.value = null; routeMarkerB.value = null;
 };
 
 const calculateRoute = async () => {
   if (!routeA.value || !routeB.value || !map.value) return;
   const rawMap = toRaw(map.value);
-  if (routePolyline.value) rawMap.removeLayer(toRaw(routePolyline.value));
   try {
     const res = await fetch(`https://router.project-osrm.org/route/v1/driving/${routeA.value.lon},${routeA.value.lat};${routeB.value.lon},${routeB.value.lat}?overview=full&geometries=geojson`);
     const data = await res.json();
     if (data.routes && data.routes.length > 0) {
-      const coords = data.routes[0].geometry.coordinates.map((c: any[]) => [c[1], c[0]]);
-      const rColor = loadedCategoryColors.value['route_line'] || '#3880ff';
-      const rOp = (loadedCategoryOpacities.value['route_line'] ?? 80) / 100;
-      const rWeight = loadedCategorySizes.value['route_line'] || 6;
-      const rStyle = loadedCategoryLineStyles.value['route_line'] || 'dashed'; // Маршруты по умолчанию пунктирные
-      const dashArray = getDashArrayForStyle(rStyle, rWeight);
+      const geojson = data.routes[0].geometry;
+      if (!rawMap.getSource('route')) {
+        rawMap.addSource('route', { type: 'geojson', data: geojson });
+        rawMap.addLayer({ id: 'route-line', type: 'line', source: 'route', paint: getLinePaint('route_line') });
+      } else (rawMap.getSource('route') as any).setData(geojson);
 
-      routePolyline.value = L.polyline(coords, { 
-        color: rColor, weight: rWeight, opacity: rOp, dashArray: dashArray, pane: 'routePane' 
-      }).addTo(rawMap);
-      rawMap.fitBounds(toRaw(routePolyline.value).getBounds(), { padding: [50, 50] });
+      const coordinates = geojson.coordinates;
+      const bounds = coordinates.reduce((bounds: maplibregl.LngLatBounds, coord: any) => bounds.extend(coord), new maplibregl.LngLatBounds(coordinates[0], coordinates[0]));
+      rawMap.fitBounds(bounds, { padding: 50 });
     }
-  } catch(e) {}
+  } catch (e) { }
 };
 
 const routeTo = async (lat: number, lon: number, name: string) => {
@@ -304,235 +408,106 @@ const routeTo = async (lat: number, lon: number, name: string) => {
   if (!routeA.value) await locateUser(); else calculateRoute();
 };
 
-const parseOSMElements = (elements: any[], isGeom: boolean) => {
-  elements.forEach((el: any) => {
-    if (!el.tags) return;
-
-    if (isGeom && el.geometry && el.geometry.length > 0) {
-      let geomCat = categories.find(c => {
-        if (!c.isArea && !c.isLine) return false;
-        if (c.id === 'highway_bridge') return el.tags.bridge === 'yes';
-        if (c.id === 'water') return el.tags.natural === 'water' || el.tags.waterway;
-        if (c.id === 'landuse_green') return ['forest', 'grass', 'meadow', 'recreation_ground'].includes(el.tags.landuse) || el.tags.natural === 'wood';
-        if (c.id === 'cemetery') return el.tags.landuse === 'cemetery' || el.tags.amenity === 'grave_yard';
-        if (c.id === 'building') return !!el.tags.building;
-        if (c.osmKey === 'highway' && el.tags.highway && el.tags.highway !== 'bus_stop') {
-          if (c.osmValue === 'motorway' && ['motorway', 'trunk'].includes(el.tags.highway)) return true;
-          if (c.osmValue === 'primary' && el.tags.highway === 'primary') return true;
-          if (c.osmValue === 'secondary' && ['secondary', 'tertiary'].includes(el.tags.highway)) return true;
-          if (c.osmValue === 'residential' && ['residential', 'living_street'].includes(el.tags.highway)) return true;
-          if (c.osmValue === 'pedestrian' && ['pedestrian', 'footway', 'path'].includes(el.tags.highway)) return true;
-        }
-        return false;
-      });
-
-      if (!geomCat && el.tags.highway && el.tags.highway !== 'bus_stop') geomCat = categories.find(c => c.id === 'highway_unclassified');
-
-      if (geomCat) {
-        knownPOIs.value.set(`geom_${el.id}`, { 
-          id: `geom_${el.id}`, lat: el.geometry[0].lat, lon: el.geometry[0].lon, name: el.tags.name || 'Территория', categoryId: geomCat.id, geometry: el.geometry 
-        });
-      }
-    } 
-    
-    const lat = el.lat ?? el.center?.lat;
-    const lon = el.lon ?? el.center?.lon;
-    
-    if (!isGeom && lat !== undefined && lon !== undefined) {
-      let poiCat = categories.find(c => !c.isArea && !c.isLine && !c.isSpecial && c.osmKey !== 'any' && c.osmValue !== 'any' && el.tags[c.osmKey] === c.osmValue);
-      if (!poiCat) poiCat = categories.find(c => !c.isArea && !c.isLine && !c.isSpecial && c.osmKey !== 'any' && c.osmValue === 'any' && el.tags[c.osmKey]);
-      if (!poiCat && (el.tags.amenity || el.tags.shop || el.tags.office || el.tags.tourism || el.tags.leisure || el.tags.craft)) poiCat = categories.find(c => c.id === 'other');
-
-      if (poiCat) {
-        const subCat = el.tags.amenity || el.tags.shop || el.tags.office || el.tags.tourism || el.tags.craft || 'Объект';
-        knownPOIs.value.set(`poi_${el.id}`, { id: `poi_${el.id}`, lat, lon, name: el.tags.name || subCat, categoryId: poiCat.id, subCategory: subCat });
-      }
-    }
-  });
-};
-
-const fetchPOIs = async () => {
-  if (!map.value || currentZoom.value < globalMinZoom) return;
-  if (abortController) abortController.abort();
-  abortController = new AbortController();
-  const signal = abortController.signal;
-
-  isLoading.value = true;
-  const bounds = toRaw(map.value).getBounds();
-  const bbox = `${bounds.getSouth()},${bounds.getWest()},${bounds.getNorth()},${bounds.getEast()}`;
-
-  const apiMirrors = [
-    'https://overpass-api.de/api/interpreter',
-    'https://lz4.overpass-api.de/api/interpreter',
-    'https://overpass.kumi.systems/api/interpreter'
-  ];
-
-  const fetchLayerWithRetry = async (query: string, isGeom: boolean) => {
-    for (let i = 0; i < apiMirrors.length; i++) {
-      if (signal.aborted) return;
-      try {
-        const res = await fetch(`${apiMirrors[i]}?data=${encodeURIComponent(query)}`, { signal });
-        if (res.ok) {
-          const data = await res.json();
-          parseOSMElements(data.elements, isGeom);
-          return;
-        }
-      } catch (e: any) {
-        if (e.name === 'AbortError') return;
-      }
-    }
-  };
-
-  const queryVital = `[out:json][timeout:15];( nwr["amenity"~"hospital|clinic|pharmacy|dentist|veterinary"](${bbox}); nwr["highway"="bus_stop"](${bbox}); );out center;`;
-  const queryNatureRoads = `[out:json][timeout:25];( nwr["natural"~"water|wood"](${bbox}); nwr["waterway"](${bbox}); nwr["landuse"~"forest|grass|cemetery"](${bbox}); way["highway"](${bbox}); way["bridge"="yes"](${bbox}); );out geom;`;
-  const queryShops = `[out:json][timeout:15];( nwr["shop"](${bbox}); nwr["amenity"~"restaurant|cafe|fast_food|bank|atm|fuel|parking|school|car_wash|post_office"](${bbox}); nwr["office"](${bbox}); nwr["craft"](${bbox}); nwr["leisure"~"park|fitness_centre"](${bbox}); nwr["tourism"="hotel"](${bbox}); );out center;`;
-  const queryBuildings = `[out:json][timeout:25];( nwr["building"](${bbox}); );out geom;`;
-
-  try {
-    const promises = [];
-    promises.push(fetchLayerWithRetry(queryVital, false));
-    promises.push(fetchLayerWithRetry(queryNatureRoads, true));
-    
-    if (currentZoom.value >= 14) promises.push(fetchLayerWithRetry(queryShops, false));
-    if (currentZoom.value >= 15) promises.push(fetchLayerWithRetry(queryBuildings, true));
-    
-    await Promise.all(promises);
-    renderMarkers();
-  } catch (e: any) {
-  } finally { isLoading.value = false; }
-};
-
-const renderMarkers = () => {
-  const rawMap = toRaw(map.value);
-  const rawMarkers = toRaw(markersGroup.value);
-  if (!rawMap || !rawMarkers) return;
-  
-  rawMarkers.clearLayers();
-  if (currentZoom.value < globalMinZoom) return;
-  
-  const bounds = rawMap.getBounds().pad(0.2); 
-  let renderCount = 0;
-
-  for (const poi of knownPOIs.value.values()) {
-    const matchedCategory = categories.find(c => c.id === poi.categoryId);
-    if (!matchedCategory || matchedCategory.isSpecial || currentZoom.value < matchedCategory.minZoom) continue;
-
-    const color = loadedCategoryColors.value[matchedCategory.id] || matchedCategory.color;
-    const size = loadedCategorySizes.value[matchedCategory.id] || 40;
-    const opacity = (loadedCategoryOpacities.value[matchedCategory.id] ?? 100) / 100;
-    const hasBg = loadedCategoryBgStates.value[matchedCategory.id] ?? true;
-
-    if (poi.id.startsWith('geom_') && poi.geometry) {
-      const coords = poi.geometry.map((g: any) => [g.lat, g.lon] as L.LatLngTuple);
-      const pane = matchedCategory.pane || 'overlayPane';
-      
-      if (matchedCategory.isArea) {
-        const poly = L.polygon(coords, { color, fillColor: color, fillOpacity: opacity, weight: 1, stroke: false, pane }).addTo(rawMarkers);
-        poly.on('contextmenu', (e: any) => { L.DomEvent.stopPropagation(e); routeTo(e.latlng.lat, e.latlng.lng, poi.name); });
-      } else if (matchedCategory.isLine) {
-        const weight = (size / 10) + 2; 
-        const lineStyle = loadedCategoryLineStyles.value[matchedCategory.id] || 'solid';
-        const dashArray = getDashArrayForStyle(lineStyle, weight);
-        
-        L.polyline(coords, { color, weight, opacity, dashArray, pane, lineCap: lineStyle === 'dotted' ? 'round' : 'butt' }).addTo(rawMarkers);
-      }
-      renderCount++;
-      continue;
-    }
-
-    if (poi.id.startsWith('poi_')) {
-      const point = L.latLng(poi.lat, poi.lon);
-      if (!bounds.contains(point)) continue;
-
-      const img = loadedPoiIcons.value[poi.id] || loadedIcons.value[matchedCategory.id];
-      const iconChar = matchedCategory.icon || matchedCategory.name[0];
-      const cacheKey = `${poi.id}_${img ? 'img' : 'char'}_${color}_${size}_${opacity}_${hasBg}`;
-      let icon = iconCache.get(cacheKey);
-
-      if (!icon) {
-        const baseStyle = `width: ${size}px; height: ${size}px; display: flex; align-items: center; justify-content: center; opacity: ${opacity}; font-family: system-ui, "Apple Color Emoji", "Segoe UI Emoji", sans-serif; line-height: 1;`;
-        let markerHtml = '';
-
-        if (img) {
-          if (hasBg) markerHtml = `<div style="${baseStyle} border: 2px solid ${color}; overflow: hidden; background: white; border-radius: 4px;"><img src="${img}" style="width: 100%; height: 100%; object-fit: cover;" /></div>`;
-          else markerHtml = `<div style="${baseStyle} filter: drop-shadow(0 2px 4px rgba(0,0,0,0.4));"><img src="${img}" style="width: 100%; height: 100%; object-fit: contain;" /></div>`;
-        } else {
-          if (hasBg) markerHtml = `<div style="${baseStyle} background-color: ${color}; border: 2px solid white; border-radius: 4px; color: white; font-weight: bold; font-size: ${size/2}px; text-shadow: 0 1px 2px rgba(0,0,0,0.4);">${iconChar}</div>`;
-          else markerHtml = `<div style="${baseStyle} color: ${color}; font-weight: 900; font-size: ${size/1.2}px; text-shadow: 0 2px 4px rgba(0,0,0,0.5);">${iconChar}</div>`;
-        }
-
-        icon = L.divIcon({ html: markerHtml, className: 'clear-leaflet-style', iconSize: [size, size], iconAnchor: [size/2, size/2] });
-        iconCache.set(cacheKey, icon);
-      }
-
-      L.marker([poi.lat, poi.lon], { icon, pane: 'poiPane' })
-        .on('click', () => { selectedPOI.value = poi; isPoiModalOpen.value = true; })
-        .addTo(rawMarkers);
-        
-      renderCount++;
-    }
-  }
-  drawnElements.value = renderCount;
-};
-
 const changeIconForPOI = async (poiId: string) => {
   const img = await Camera.getPhoto({ quality: 90, width: 300, height: 300, allowEditing: true, resultType: CameraResultType.Base64, source: CameraSource.Photos });
   if (img.base64String) {
-    const name = `poi_${poiId}.jpg`;
+    const name = `cat_${poiId}.jpg`;
     await Filesystem.writeFile({ path: name, data: img.base64String, directory: Directory.Data });
-    await Preferences.set({ key: `icon_path_poi_${poiId}`, value: name });
-    loadedPoiIcons.value[poiId] = `data:image/jpeg;base64,${img.base64String}`;
-    iconCache.clear();
-    renderMarkers(); 
+    await Preferences.set({ key: `icon_path_${poiId}`, value: name });
+    loadedIcons.value[poiId] = `data:image/jpeg;base64,${img.base64String}`;
+    
+    if (map.value) {
+      const rawMap = toRaw(map.value);
+      await initMapLibreImages(rawMap);
+      rawMap.setStyle(generateMapStyle()); 
+    }
     isPoiModalOpen.value = false;
   }
 };
 
 const removeIconForPOI = async (poiId: string) => {
-  const { value } = await Preferences.get({ key: `icon_path_poi_${poiId}` });
+  const { value } = await Preferences.get({ key: `icon_path_${poiId}` });
   if (value) await Filesystem.deleteFile({ path: value, directory: Directory.Data });
-  await Preferences.remove({ key: `icon_path_poi_${poiId}` });
-  delete loadedPoiIcons.value[poiId];
-  iconCache.clear();
-  renderMarkers(); 
+  await Preferences.remove({ key: `icon_path_${poiId}` });
+  delete loadedIcons.value[poiId];
+  
+  if (map.value) {
+    const rawMap = toRaw(map.value);
+    await initMapLibreImages(rawMap);
+    rawMap.setStyle(generateMapStyle());
+  }
   isPoiModalOpen.value = false;
 };
 
+// ОБРАБОТКА ЖИЗНЕННОГО ЦИКЛА
 onIonViewDidEnter(async () => {
   await loadStorageData();
-  if (!map.value) {
-    map.value = L.map('map', { zoomControl: false }).setView([51.1273, 71.4283], 15);
-    L.control.zoom({ position: 'bottomright' }).addTo(toRaw(map.value));
-    
-    const rawMap = toRaw(map.value);
-    rawMap.createPane('waterPane'); rawMap.getPane('waterPane')!.style.zIndex = '200';
-    rawMap.createPane('greenPane'); rawMap.getPane('greenPane')!.style.zIndex = '250';
-    rawMap.createPane('buildingPane'); rawMap.getPane('buildingPane')!.style.zIndex = '300';
-    rawMap.createPane('highwayPane'); rawMap.getPane('highwayPane')!.style.zIndex = '400';
-    rawMap.createPane('routePane'); rawMap.getPane('routePane')!.style.zIndex = '500';
-    rawMap.createPane('poiPane'); rawMap.getPane('poiPane')!.style.zIndex = '600';
 
-    markersGroup.value = L.layerGroup().addTo(rawMap);
-    
-    rawMap.on('contextmenu', (e: any) => { routeTo(e.latlng.lat, e.latlng.lng, 'Выбранная точка'); });
-    rawMap.on('moveend', () => {
-      currentZoom.value = rawMap.getZoom();
-      renderMarkers();
-      if (fetchTimer) clearTimeout(fetchTimer);
-      fetchTimer = setTimeout(() => {
-        if (currentZoom.value >= globalMinZoom) fetchPOIs();
-      }, 600);
+  if (!map.value) {
+    map.value = new maplibregl.Map({
+      container: 'map',
+      style: generateMapStyle(),
+      center: [71.4283, 51.1273],
+      zoom: 15,
+      // Если включено 3D - ставим наклон 45, иначе строго 0
+      pitch: globalIs3D.value ? 45 : 0, 
+      bearing: 0,
+      attributionControl: false,
+      // Блокируем изменение pitch пользователем, если выбран режим 2D
+      pitchWithRotate: globalIs3D.value,
+      dragPitch: globalIs3D.value
     });
+
+    const rawMap = toRaw(map.value);
+    // Визуальный компас/контрол наклона добавляем только для 3D
+    if (globalIs3D.value) {
+      rawMap.addControl(new maplibregl.NavigationControl({ visualizePitch: true }), 'bottom-right');
+    }
+
+    rawMap.on('load', async () => {
+      isLoading.value = false;
+      await initMapLibreImages(rawMap);
+      
+      const poiLayerIds = categories.filter(c => !c.isArea && !c.isLine && !c.isSpecial).map(c => `poi_${c.id}`);
+      
+      rawMap.on('click', poiLayerIds, (e: any) => {
+        if (!e.features || e.features.length === 0) return;
+        const feature = e.features[0];
+        const catId = feature.layer.id.replace('poi_', '');
+        
+        selectedPOI.value = {
+          id: catId, lat: e.lngLat.lat, lon: e.lngLat.lng,
+          name: feature.properties.name || feature.properties.class || 'Объект',
+          categoryId: catId, subCategory: feature.properties.subclass
+        };
+        isPoiModalOpen.value = true;
+      });
+
+      rawMap.on('mouseenter', poiLayerIds, () => { rawMap.getCanvas().style.cursor = 'pointer'; });
+      rawMap.on('mouseleave', poiLayerIds, () => { rawMap.getCanvas().style.cursor = ''; });
+    });
+  } else {
+    // ВАЖНО: Если мы вернулись со вкладки Настроек
+    const rawMap = toRaw(map.value);
+    await initMapLibreImages(rawMap);
+    rawMap.setStyle(generateMapStyle());
+
+    // Обновляем настройки камеры (pitch)
+    if (globalIs3D.value) {
+      rawMap.dragPitch.enable();
+      rawMap.easeTo({ pitch: 45 });
+    } else {
+      rawMap.dragPitch.disable();
+      rawMap.easeTo({ pitch: 0 });
+    }
   }
-  renderMarkers();
-  fetchPOIs();
 });
 </script>
 
 <style scoped>
 .map-wrapper { position: relative; width: 100%; height: 100%; display: flex; flex-direction: column; }
-.map-container { flex: 1; width: 100%; z-index: 1; transition: background-color 0.3s; }
-.routing-panel { position: absolute; top: 10px; left: 10px; right: 10px; background: white; border-radius: 12px; padding: 12px; box-shadow: 0 4px 12px rgba(0,0,0,0.2); z-index: 1000; }
+.map-container { flex: 1; width: 100%; z-index: 1; background-color: #e8e6e1; }
+.routing-panel { position: absolute; top: 10px; left: 10px; right: 10px; background: white; border-radius: 12px; padding: 12px; box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2); z-index: 1000; }
 .route-inputs { position: relative; display: flex; flex-direction: column; gap: 8px; padding-right: 40px; }
 .input-row { display: flex; align-items: center; background: #f4f5f8; border-radius: 8px; padding: 0 8px; }
 .dot { width: 24px; font-weight: bold; font-size: 14px; text-align: center; }
@@ -542,10 +517,9 @@ onIonViewDidEnter(async () => {
 .swap-btn { position: absolute; right: -5px; top: 50%; transform: translateY(-50%); height: 40px; }
 .search-results { margin-top: 8px; max-height: 150px; overflow-y: auto; background: white; border: 1px solid #eee; border-radius: 8px; }
 .search-item { padding: 12px; border-bottom: 1px solid #f0f0f0; font-size: 14px; cursor: pointer; }
-.floating-status { position: absolute; bottom: 80px; left: 50%; transform: translateX(-50%); background: white; padding: 6px 12px; border-radius: 20px; box-shadow: 0 2px 8px rgba(0,0,0,0.2); z-index: 1000; pointer-events: none; }
+.floating-status { position: absolute; bottom: 80px; left: 50%; transform: translateX(-50%); background: white; padding: 6px 12px; border-radius: 20px; box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2); z-index: 1000; pointer-events: none; }
 
-:deep(.clear-leaflet-style) { background: transparent !important; border: none !important; }
-:deep(.route-marker) { width: 30px; height: 30px; border-radius: 50%; color: white; display: flex; align-items: center; justify-content: center; font-weight: bold; box-shadow: 0 4px 8px rgba(0,0,0,0.4); border: 2px solid white; }
+:deep(.route-marker) { width: 30px; height: 30px; border-radius: 50%; color: white; display: flex; align-items: center; justify-content: center; font-weight: bold; box-shadow: 0 4px 8px rgba(0, 0, 0, 0.4); border: 2px solid white; }
 :deep(.route-marker.a) { background-color: #3880ff; }
 :deep(.route-marker.b) { background-color: #eb445a; }
 </style>
