@@ -91,7 +91,7 @@
 <script setup lang="ts">
 import { IonPage, IonHeader, IonToolbar, IonTitle, IonContent, IonButton, IonText, IonModal, IonList, IonItem, IonLabel, IonFab, IonFabButton, IonIcon, IonSegment, IonSegmentButton, onIonViewDidEnter } from '@ionic/vue';
 import { locateOutline, swapVerticalOutline } from 'ionicons/icons';
-import { ref, shallowRef } from 'vue';
+import { ref, shallowRef, watch } from 'vue';
 import maplibregl from 'maplibre-gl';
 import 'maplibre-gl/dist/maplibre-gl.css';
 import { Camera, CameraResultType, CameraSource } from '@capacitor/camera';
@@ -168,9 +168,16 @@ const routeMode = ref<'car' | 'bus' | 'bicycle' | 'walk'>('car');
 const currentCity = ref<string | null>(null);
 const searchResults = ref<any[]>([]);
 const activeSearchField = ref<'A' | 'B' | null>(null);
+
+watch(routeMode, (newMode, oldMode) => {
+  if (newMode !== oldMode && routeA.value && routeB.value) {
+    calculateRoute();
+  }
+});
 const routeMarkerA = shallowRef<maplibregl.Marker | null>(null);
 const routeMarkerB = shallowRef<maplibregl.Marker | null>(null);
 const userLocation = ref<{ lat: number, lon: number } | null>(null);
+const previousUserLocation = ref<{ lat: number, lon: number } | null>(null);
 const userLocationMarker = shallowRef<maplibregl.Marker | null>(null);
 const userIconPath = ref<string | null>(null);
 const userHeading = ref<number>(0);
@@ -182,6 +189,34 @@ const readFileAsDataUrl = async (path: string): Promise<string | null> => {
     const file = await Filesystem.readFile({ path, directory: Directory.Data });
     return `data:image/jpeg;base64,${file.data}`;
   } catch (e) { return null; }
+};
+
+const calculateBearing = (from: { lat: number, lon: number }, to: { lat: number, lon: number }) => {
+  const toRad = Math.PI / 180;
+  const fromLat = from.lat * toRad;
+  const fromLon = from.lon * toRad;
+  const toLat = to.lat * toRad;
+  const toLon = to.lon * toRad;
+  const y = Math.sin(toLon - fromLon) * Math.cos(toLat);
+  const x = Math.cos(fromLat) * Math.sin(toLat) - Math.sin(fromLat) * Math.cos(toLat) * Math.cos(toLon - fromLon);
+  const bearing = Math.atan2(y, x) * 180 / Math.PI;
+  return (bearing + 360) % 360;
+};
+
+const setUserLocation = (lat: number, lon: number, headingFromGps: number | null) => {
+  const nextLocation = { lat, lon };
+  const prev = userLocation.value;
+  if (headingFromGps !== null && headingFromGps !== undefined) {
+    userHeading.value = headingFromGps;
+  } else if (prev) {
+    userHeading.value = calculateBearing(prev, nextLocation);
+  }
+  previousUserLocation.value = prev || nextLocation;
+  userLocation.value = nextLocation;
+  updateUserMarker();
+  if (map.value) {
+    map.value.easeTo({ center: [lon, lat], duration: 500, easing: (t) => t });
+  }
 };
 
 const isColorDark = (color: string) => {
@@ -502,22 +537,17 @@ const locateUser = async () => {
       if (request.location !== 'granted') { alert('Предоставьте доступ к геолокации.'); return; }
     }
     const pos = await Geolocation.getCurrentPosition({ enableHighAccuracy: true, timeout: 10000 });
-    userLocation.value = { lat: pos.coords.latitude, lon: pos.coords.longitude };
-    if (pos.coords.heading !== null) userHeading.value = pos.coords.heading;
+    setUserLocation(pos.coords.latitude, pos.coords.longitude, pos.coords.heading ?? null);
     routeA.value = { lat: pos.coords.latitude, lon: pos.coords.longitude };
     routeTextA.value = 'Моё местоположение';
     await setCurrentCity(pos.coords.latitude, pos.coords.longitude);
-    map.value?.flyTo({ center: [pos.coords.longitude, pos.coords.latitude], zoom: 16 });
-    updateUserMarker();
     updateRouteMarkers(); if (routeB.value) calculateRoute();
 
     // Start watching position for movement and heading
     if (positionWatchId.value) Geolocation.clearWatch({ id: positionWatchId.value });
     positionWatchId.value = await Geolocation.watchPosition({ enableHighAccuracy: true }, (pos, err) => {
       if (err || !pos) return;
-      userLocation.value = { lat: pos.coords.latitude, lon: pos.coords.longitude };
-      if (pos.coords.heading !== null) userHeading.value = pos.coords.heading;
-      updateUserMarker();
+      setUserLocation(pos.coords.latitude, pos.coords.longitude, pos.coords.heading ?? null);
     });
   } catch (e: any) { alert('Не удалось получить геоданные.'); }
 };
@@ -582,7 +612,8 @@ const createUserMarkerElement = () => {
 
 const updateUserMarker = () => {
   const rawMap = map.value; if (!rawMap) return;
-  if (userLocationMarker.value) {
+  if (userLocationMarker.value && userLocation.value) {
+    userLocationMarker.value.setLngLat([userLocation.value.lon, userLocation.value.lat]);
     const element = userLocationMarker.value.getElement();
     element.style.transform = `rotate(${userHeading.value}deg)`;
     element.style.transformOrigin = 'center';
@@ -712,8 +743,7 @@ onIonViewDidEnter(async () => {
         isPoiModalOpen.value = true;
       });
 
-      rawMap.on('mouseenter', poiLayerIds, () => { rawMap.getCanvas().style.cursor = 'pointer'; });
-      rawMap.on('mouseleave', poiLayerIds, () => { rawMap.getCanvas().style.cursor = ''; });
+      await locateUser();
     });
   } else {
     if (map.value) {
