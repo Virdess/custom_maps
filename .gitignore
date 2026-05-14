@@ -41,5 +41,3 @@ bower_components/
 *.swo
 *.DS_Store
 .vscode/
-
-android/
