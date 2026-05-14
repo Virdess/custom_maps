@@ -1,2 +1,38 @@
 /* For information on how to create your own theme, please refer to:
 http://ionicframework.com/docs/theming/ */
+
+:root {
+  --ion-background-color: #ffffff;
+  --ion-text-color: #000000;
+  --ion-card-background: rgba(255,255,255,0.92);
+  --ion-card-color: var(--ion-text-color);
+  --ion-item-background: rgba(255,255,255,0.92);
+  --ion-item-color: var(--ion-text-color);
+  --ion-input-background: rgba(255,255,255,0.92);
+  --ion-input-color: var(--ion-text-color);
+  --ion-searchbar-background: rgba(255,255,255,0.92);
+  --ion-searchbar-color: var(--ion-text-color);
+  --ion-select-background: rgba(255,255,255,0.92);
+  --ion-select-color: var(--ion-text-color);
+  --ion-select-placeholder-color: rgba(0,0,0,0.6);
+  --ion-color-step-100: rgba(0,0,0,0.04);
+  --ion-color-step-150: rgba(0,0,0,0.08);
+}
+
+body.dark {
+  --ion-background-color: #111111;
+  --ion-text-color: #ffffff;
+  --ion-card-background: rgba(255,255,255,0.08);
+  --ion-card-color: var(--ion-text-color);
+  --ion-item-background: rgba(255,255,255,0.08);
+  --ion-item-color: var(--ion-text-color);
+  --ion-input-background: rgba(255,255,255,0.08);
+  --ion-input-color: var(--ion-text-color);
+  --ion-searchbar-background: rgba(255,255,255,0.08);
+  --ion-searchbar-color: var(--ion-text-color);
+  --ion-select-background: rgba(255,255,255,0.08);
+  --ion-select-color: var(--ion-text-color);
+  --ion-select-placeholder-color: rgba(255,255,255,0.7);
+  --ion-color-step-100: rgba(255,255,255,0.08);
+  --ion-color-step-150: rgba(255,255,255,0.12);
+}
