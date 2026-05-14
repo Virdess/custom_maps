@@ -9,7 +9,6 @@
         Сбросить все настройки и память
       </ion-button>
 
-      <!-- Глобальные настройки -->
       <ion-card color="light" class="ion-margin-bottom">
         <ion-card-header>
           <ion-card-title>Глобальные настройки</ion-card-title>
@@ -54,12 +53,12 @@
 
             <ion-item lines="none" v-if="!cat.isArea">
               <ion-label position="stacked">Размер / Толщина: {{ sizes[cat.id] || 40 }}</ion-label>
-              <ion-range min="10" max="100" :value="sizes[cat.id] || 40" @ionChange="updateSize(cat.id, $event.detail.value as number)"></ion-range>
+              <ion-range :min="10" :max="100" :value="sizes[cat.id] || 40" @ionChange="updateSize(cat.id, Number($event.detail.value))"></ion-range>
             </ion-item>
 
             <ion-item lines="none">
               <ion-label position="stacked">Прозрачность (Для зданий работает как голограмма): {{ opacities[cat.id] ?? 100 }}%</ion-label>
-              <ion-range min="0" max="100" :value="opacities[cat.id] ?? 100" @ionChange="updateOpacity(cat.id, $event.detail.value as number)"></ion-range>
+              <ion-range :min="0" :max="100" :value="opacities[cat.id] ?? 100" @ionChange="updateOpacity(cat.id, Number($event.detail.value))"></ion-range>
             </ion-item>
 
             <ion-item lines="none" v-if="cat.isLine || cat.id === 'route_line'">
@@ -79,7 +78,7 @@
 </template>
 
 <script setup lang="ts">
-import { IonPage, IonHeader, IonToolbar, IonTitle, IonContent, IonList, IonItem, IonLabel, IonButton, IonSearchbar, IonAccordionGroup, IonAccordion, IonToggle, IonRange, IonSelect, IonSelectOption, IonCard, IonCardHeader, IonCardTitle, IonCardContent, onIonViewDidEnter } from '@ionic/vue';
+import { IonPage, IonHeader, IonToolbar, IonTitle, IonContent, IonItem, IonLabel, IonButton, IonSearchbar, IonAccordionGroup, IonAccordion, IonToggle, IonRange, IonSelect, IonSelectOption, IonCard, IonCardHeader, IonCardTitle, IonCardContent, onIonViewDidEnter } from '@ionic/vue';
 import { ref, computed } from 'vue';
 import { Camera, CameraResultType, CameraSource } from '@capacitor/camera';
 import { Preferences } from '@capacitor/preferences';
@@ -138,7 +137,7 @@ const readFileAsDataUrl = async (path: string) => {
 
 const load = async () => {
   const { value: is3D } = await Preferences.get({ key: `global_is_3d` });
-  globalIs3D.value = is3D !== 'false'; // true по умолчанию
+  globalIs3D.value = is3D !== 'false';
 
   for (const cat of categories) {
     if (!cat.isSpecial) {

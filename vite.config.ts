@@ -1,23 +1,25 @@
 /// <reference types="vitest" />
 
-import legacy from '@vitejs/plugin-legacy'
-import vue from '@vitejs/plugin-vue'
-import path from 'path'
-import { defineConfig } from 'vite'
+import { defineConfig } from 'vite';
+import vue from '@vitejs/plugin-vue';
+import path from 'path';
 
-// https://vitejs.dev/config/
 export default defineConfig({
+  // Убираем legacy() плагин, оставляем только vue()
   plugins: [
-    vue(),
-    legacy()
+    vue()
   ],
   resolve: {
     alias: {
       '@': path.resolve(__dirname, './src'),
     },
   },
+  build: {
+    target: 'es2022', // Теперь этот таргет не будет перезаписываться!
+    chunkSizeWarningLimit: 1500,
+  },
   test: {
     globals: true,
-    environment: 'jsdom'
-  }
-})
+    environment: 'jsdom',
+  },
+});
