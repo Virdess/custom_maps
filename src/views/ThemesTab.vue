@@ -1,4 +1,5 @@
 <template>
+  
   <ion-page>
     <ion-header>
       <ion-toolbar><ion-title>Настройки оформления</ion-title></ion-toolbar>
