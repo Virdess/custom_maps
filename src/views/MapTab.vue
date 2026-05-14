@@ -39,6 +39,12 @@
           </div>
           <ion-button expand="block" size="small" color="danger" class="ion-margin-top" v-if="routeA || routeB"
             @click="clearRoute">Сбросить маршрут</ion-button>
+          <div class="user-icon-controls" v-if="userLocation">
+            <ion-button expand="block" size="small" color="primary" class="ion-margin-top"
+              @click="changeUserIcon">Изменить иконку пользователя</ion-button>
+            <ion-button expand="block" size="small" fill="outline" color="primary" class="ion-margin-top" v-if="userIconPath"
+              @click="removeUserIcon">Сбросить иконку</ion-button>
+          </div>
         </div>
 
         <div class="floating-status">
@@ -164,6 +170,9 @@ const searchResults = ref<any[]>([]);
 const activeSearchField = ref<'A' | 'B' | null>(null);
 const routeMarkerA = shallowRef<maplibregl.Marker | null>(null);
 const routeMarkerB = shallowRef<maplibregl.Marker | null>(null);
+const userLocation = ref<{ lat: number, lon: number } | null>(null);
+const userLocationMarker = shallowRef<maplibregl.Marker | null>(null);
+const userIconPath = ref<string | null>(null);
 let debounceTimer: any = null;
 
 const readFileAsDataUrl = async (path: string): Promise<string | null> => {
@@ -209,6 +218,13 @@ const loadStorageData = async () => {
       const { value: gb } = await Preferences.get({ key: `cat_gl_blur_${cat.id}` }); if (gb) glBlur.value[cat.id] = parseInt(gb, 10);
       const { value: go } = await Preferences.get({ key: `cat_gl_op_${cat.id}` }); if (go) glOpacity.value[cat.id] = parseInt(go, 10);
     }
+  }
+  
+  // Load user icon
+  const { value: userIcon } = await Preferences.get({ key: 'user_icon_path' });
+  if (userIcon) {
+    const data = await readFileAsDataUrl(userIcon);
+    if (data) userIconPath.value = data;
   }
 };
 
@@ -484,10 +500,12 @@ const locateUser = async () => {
       if (request.location !== 'granted') { alert('Предоставьте доступ к геолокации.'); return; }
     }
     const pos = await Geolocation.getCurrentPosition({ enableHighAccuracy: true, timeout: 10000 });
+    userLocation.value = { lat: pos.coords.latitude, lon: pos.coords.longitude };
     routeA.value = { lat: pos.coords.latitude, lon: pos.coords.longitude };
     routeTextA.value = 'Моё местоположение';
     await setCurrentCity(pos.coords.latitude, pos.coords.longitude);
     map.value?.flyTo({ center: [pos.coords.longitude, pos.coords.latitude], zoom: 16 });
+    updateUserMarker();
     updateRouteMarkers(); if (routeB.value) calculateRoute();
   } catch (e: any) { alert('Не удалось получить геоданные.'); }
 };
@@ -517,6 +535,41 @@ const swapRoutes = () => {
 
 const createRouteMarkerElement = (type: 'A' | 'B') => {
   const el = document.createElement('div'); el.className = `route-marker ${type.toLowerCase()}`; el.innerText = type; return el;
+};
+
+const createUserMarkerElement = () => {
+  const el = document.createElement('div');
+  el.className = 'user-marker';
+  if (userIconPath.value) {
+    const img = document.createElement('img');
+    img.src = userIconPath.value;
+    img.style.width = '40px';
+    img.style.height = '40px';
+    img.style.borderRadius = '50%';
+    img.style.border = '2px solid white';
+    img.style.boxShadow = '0 4px 8px rgba(0, 0, 0, 0.4)';
+    el.appendChild(img);
+  } else {
+    el.innerHTML = '👤';
+    el.style.fontSize = '24px';
+    el.style.display = 'flex';
+    el.style.alignItems = 'center';
+    el.style.justifyContent = 'center';
+    el.style.width = '40px';
+    el.style.height = '40px';
+    el.style.borderRadius = '50%';
+    el.style.backgroundColor = '#3880ff';
+    el.style.color = 'white';
+    el.style.border = '2px solid white';
+    el.style.boxShadow = '0 4px 8px rgba(0, 0, 0, 0.4)';
+  }
+  return el;
+};
+
+const updateUserMarker = () => {
+  const rawMap = map.value; if (!rawMap) return;
+  if (userLocationMarker.value) userLocationMarker.value.remove();
+  if (userLocation.value) userLocationMarker.value = new maplibregl.Marker({ element: createUserMarkerElement() }).setLngLat([userLocation.value.lon, userLocation.value.lat]).addTo(rawMap);
 };
 
 const updateRouteMarkers = () => {
@@ -577,6 +630,27 @@ const removeIconForPOI = async (poiId: string) => {
   delete loadedIcons.value[poiId];
   if (map.value) { await initMapLibreImages(map.value); map.value.setStyle(generateMapStyle()); }
   isPoiModalOpen.value = false;
+};
+
+const changeUserIcon = async () => {
+  try {
+    const img = await Camera.getPhoto({ quality: 90, width: 300, height: 300, allowEditing: true, resultType: CameraResultType.Base64, source: CameraSource.Photos });
+    if (img.base64String) {
+      const name = `user_icon.jpg`;
+      await Filesystem.writeFile({ path: name, data: img.base64String, directory: Directory.Data });
+      await Preferences.set({ key: 'user_icon_path', value: name });
+      userIconPath.value = `data:image/jpeg;base64,${img.base64String}`;
+      updateUserMarker();
+    }
+  } catch (e) { }
+};
+
+const removeUserIcon = async () => {
+  const { value } = await Preferences.get({ key: 'user_icon_path' });
+  if (value) await Filesystem.deleteFile({ path: value, directory: Directory.Data });
+  await Preferences.remove({ key: 'user_icon_path' });
+  userIconPath.value = null;
+  updateUserMarker();
 };
 
 onIonViewDidEnter(async () => {
@@ -657,4 +731,5 @@ onIonViewDidEnter(async () => {
 :deep(.route-marker) { width: 30px; height: 30px; border-radius: 50%; color: white; display: flex; align-items: center; justify-content: center; font-weight: bold; box-shadow: 0 4px 8px rgba(0, 0, 0, 0.4); border: 2px solid white; }
 :deep(.route-marker.a) { background-color: #3880ff; }
 :deep(.route-marker.b) { background-color: #eb445a; }
+:deep(.user-marker) { pointer-events: none; }
 </style>
