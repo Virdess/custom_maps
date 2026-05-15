@@ -10,40 +10,46 @@
       <div class="map-wrapper" :class="{'pixelated-map': globalPixelated}">
 
         <!-- Панель навигации -->
-        <div class="routing-panel">
-          <div class="route-inputs">
-            <div class="input-row">
-              <span class="dot dot-a">A</span>
-              <input type="text" placeholder="Откуда (или геолокация)" v-model="routeTextA"
-                @input="searchAddress($event, 'A')" @focus="activeSearchField = 'A'" />
+        <div class="routing-panel" :class="{'collapsed': isPanelCollapsed}">
+          <div class="panel-header" @click="isPanelCollapsed = !isPanelCollapsed">
+            <strong>Поиск маршрута</strong>
+            <ion-icon :icon="isPanelCollapsed ? chevronDownOutline : chevronUpOutline"></ion-icon>
+          </div>
+          <div v-show="!isPanelCollapsed" class="panel-body">
+            <div class="route-inputs">
+              <div class="input-row">
+                <span class="dot dot-a">A</span>
+                <input type="text" placeholder="Откуда (или геолокация)" v-model="routeTextA"
+                  @input="searchAddress($event, 'A')" @focus="activeSearchField = 'A'" />
+              </div>
+              <div class="input-row">
+                <span class="dot dot-b">B</span>
+                <input type="text" placeholder="Куда (поиск или удержание)" v-model="routeTextB"
+                  @input="searchAddress($event, 'B')" @focus="activeSearchField = 'B'" />
+              </div>
+              <ion-button fill="clear" color="dark" class="swap-btn" @click="swapRoutes"><ion-icon
+                  :icon="swapVerticalOutline"></ion-icon></ion-button>
             </div>
-            <div class="input-row">
-              <span class="dot dot-b">B</span>
-              <input type="text" placeholder="Куда (поиск или удержание)" v-model="routeTextB"
-                @input="searchAddress($event, 'B')" @focus="activeSearchField = 'B'" />
+            <div class="route-mode-row">
+              <ion-segment :value="routeMode" @ionChange="updateRouteMode($event.detail.value)">
+                <ion-segment-button value="car"><ion-label>Авто</ion-label></ion-segment-button>
+                <ion-segment-button value="bus"><ion-label>Автобус</ion-label></ion-segment-button>
+                <ion-segment-button value="bicycle"><ion-label>Вел</ion-label></ion-segment-button>
+                <ion-segment-button value="walk"><ion-label>Пешком</ion-label></ion-segment-button>
+              </ion-segment>
             </div>
-            <ion-button fill="clear" color="dark" class="swap-btn" @click="swapRoutes"><ion-icon
-                :icon="swapVerticalOutline"></ion-icon></ion-button>
-          </div>
-          <div class="route-mode-row">
-            <ion-segment :value="routeMode" @ionChange="updateRouteMode($event.detail.value)">
-              <ion-segment-button value="car"><ion-label>Авто</ion-label></ion-segment-button>
-              <ion-segment-button value="bus"><ion-label>Автобус</ion-label></ion-segment-button>
-              <ion-segment-button value="bicycle"><ion-label>Вел</ion-label></ion-segment-button>
-              <ion-segment-button value="walk"><ion-label>Пешком</ion-label></ion-segment-button>
-            </ion-segment>
-          </div>
-          <div class="search-results" v-if="searchResults.length > 0">
-            <div class="search-item" v-for="res in searchResults" :key="res.place_id" @click="selectSearchResult(res)">
-              {{ res.display_name }}</div>
-          </div>
-          <ion-button expand="block" size="small" color="danger" class="ion-margin-top" v-if="routeA || routeB"
-            @click="clearRoute">Сбросить маршрут</ion-button>
-          <div class="user-icon-controls" v-if="userLocation">
-            <ion-button expand="block" size="small" color="primary" class="ion-margin-top"
-              @click="changeUserIcon">Изменить иконку пользователя</ion-button>
-            <ion-button expand="block" size="small" fill="outline" color="primary" class="ion-margin-top" v-if="userIconPath"
-              @click="removeUserIcon">Сбросить иконку</ion-button>
+            <div class="search-results" v-if="searchResults.length > 0">
+              <div class="search-item" v-for="res in searchResults" :key="res.place_id" @click="selectSearchResult(res)">
+                {{ res.display_name }}</div>
+            </div>
+            <ion-button expand="block" size="small" color="danger" class="ion-margin-top" v-if="routeA || routeB"
+              @click="clearRoute">Сбросить маршрут</ion-button>
+            <div class="user-icon-controls" v-if="userLocation">
+              <ion-button expand="block" size="small" color="primary" class="ion-margin-top"
+                @click="changeUserIcon">Изменить иконку пользователя</ion-button>
+              <ion-button expand="block" size="small" fill="outline" color="primary" class="ion-margin-top" v-if="userIconPath"
+                @click="removeUserIcon">Сбросить иконку</ion-button>
+            </div>
           </div>
         </div>
 
@@ -55,9 +61,23 @@
         <!-- Контейнер для MapLibre -->
         <div id="map" class="map-container"></div>
 
-        <ion-fab vertical="bottom" horizontal="end" slot="fixed" class="ion-margin">
-          <ion-fab-button @click="locateUser"><ion-icon :icon="locateOutline"></ion-icon></ion-fab-button>
+        <ion-fab vertical="bottom" horizontal="end" slot="fixed" class="ion-margin location-fab">
+          <!-- Функция только для центрирования карты -->
+          <ion-fab-button @click="panToUser"><ion-icon :icon="locateOutline"></ion-icon></ion-fab-button>
         </ion-fab>
+
+        <!-- Информационная панель о маршруте (снизу) -->
+        <div class="route-info-panel" v-if="routeA && routeB && routeInfo">
+          <div class="route-header">
+            <h2 class="route-duration">{{ routeInfo.duration }}</h2>
+            <span class="route-distance">{{ routeInfo.distance }}</span>
+          </div>
+          <p class="transit-info" v-if="routeMode === 'bus'">
+            <ion-icon :icon="informationCircleOutline"></ion-icon>
+            Отображаются ближайшие остановки.
+          </p>
+        </div>
+
       </div>
 
       <!-- Модалка POI -->
@@ -90,7 +110,7 @@
 
 <script setup lang="ts">
 import { IonPage, IonHeader, IonToolbar, IonTitle, IonContent, IonButton, IonText, IonModal, IonList, IonItem, IonLabel, IonFab, IonFabButton, IonIcon, IonSegment, IonSegmentButton, onIonViewDidEnter } from '@ionic/vue';
-import { locateOutline, swapVerticalOutline } from 'ionicons/icons';
+import { locateOutline, swapVerticalOutline, chevronUpOutline, chevronDownOutline, informationCircleOutline } from 'ionicons/icons';
 import { ref, shallowRef, watch } from 'vue';
 import maplibregl from 'maplibre-gl';
 import 'maplibre-gl/dist/maplibre-gl.css';
@@ -160,20 +180,29 @@ const glColor = ref<Record<string, string>>({});
 const glBlur = ref<Record<string, number>>({});
 const glOpacity = ref<Record<string, number>>({});
 
+const isPanelCollapsed = ref(false);
 const routeA = ref<{ lat: number, lon: number } | null>(null);
 const routeB = ref<{ lat: number, lon: number } | null>(null);
 const routeTextA = ref('');
 const routeTextB = ref('');
 const routeMode = ref<'car' | 'bus' | 'bicycle' | 'walk'>('car');
+const routeInfo = ref<{ duration: string, distance: string } | null>(null);
+let routeDebounceTimer: any = null;
+
+// Геоданные для восстановления после перезагрузки стиля вкладки
+const currentRouteGeoJSON = ref<any>(null);
+const transitStopsGeoJSON = ref<any>({ type: "FeatureCollection", features: [] });
+
 const currentCity = ref<string | null>(null);
 const searchResults = ref<any[]>([]);
 const activeSearchField = ref<'A' | 'B' | null>(null);
 
 watch(routeMode, (newMode, oldMode) => {
   if (newMode !== oldMode && routeA.value && routeB.value) {
-    calculateRoute();
+    calculateRoute(false); // Мгновенное перестроение без скачка камеры
   }
 });
+
 const routeMarkerA = shallowRef<maplibregl.Marker | null>(null);
 const routeMarkerB = shallowRef<maplibregl.Marker | null>(null);
 const userLocation = ref<{ lat: number, lon: number } | null>(null);
@@ -214,9 +243,7 @@ const setUserLocation = (lat: number, lon: number, headingFromGps: number | null
   previousUserLocation.value = prev || nextLocation;
   userLocation.value = nextLocation;
   updateUserMarker();
-  if (map.value) {
-    map.value.easeTo({ center: [lon, lat], duration: 500, easing: (t) => t });
-  }
+  // Убрано принудительное слежение (easeTo), чтобы пользователь мог свободно скроллить карту
 };
 
 const isColorDark = (color: string) => {
@@ -289,7 +316,8 @@ const generateMapStyle = (): any => {
     sprite: "https://tiles.openfreemap.org/sprites/osm-liberty",
     sources: { 
       openfreemap: { type: "vector", url: "https://tiles.openfreemap.org/planet/planet.json" },
-      route: { type: "geojson", data: { type: "FeatureCollection", features: [] } } // Заготовка для маршрута
+      route: { type: "geojson", data: { type: "FeatureCollection", features: [] } },
+      transit_stops: { type: "geojson", data: { type: "FeatureCollection", features: [] } } // Добавлено для остановок
     },
     layers: [
       { id: "background", type: "background", paint: { "background-color": bgCol } },
@@ -384,7 +412,79 @@ const generateMapStyle = (): any => {
     });
   }
 
-  // 5. POI ИКОНКИ
+  // 4.1. НАЗВАНИЯ УЛИЦ
+  style.layers.push({
+    id: "street-names",
+    type: "symbol",
+    source: "openfreemap",
+    "source-layer": "transportation_name",
+    minzoom: 14,
+    layout: {
+      "text-field": "{name}",
+      "symbol-placement": "line",
+      "text-font": ["Metropolis Regular"],
+      "text-size": ["interpolate", ["linear"], ["zoom"], 14, 10, 18, 14],
+      "text-anchor": "center",
+      "text-max-angle": 30
+    },
+    paint: {
+      "text-color": isDarkBg ? "#eeeeee" : "#333333",
+      "text-halo-color": isDarkBg ? "#222222" : "#ffffff",
+      "text-halo-width": 1.5
+    }
+  });
+
+  // 4.2. НОМЕРА ДОМОВ
+  style.layers.push({
+    id: "house-numbers",
+    type: "symbol",
+    source: "openfreemap",
+    "source-layer": "housenumber",
+    minzoom: 16,
+    layout: {
+      "text-field": "{housenumber}",
+      "text-font": ["Metropolis Regular"],
+      "text-size": ["interpolate", ["linear"], ["zoom"], 16, 8, 19, 12]
+    },
+    paint: {
+      "text-color": isDarkBg ? "#cccccc" : "#555555",
+      "text-halo-color": isDarkBg ? "#222222" : "#ffffff",
+      "text-halo-width": 1
+    }
+  });
+
+  // 5. ОСТАНОВКИ АВТОБУСОВ
+  style.layers.push({
+    id: "transit_stops_layer",
+    type: "circle",
+    source: "transit_stops",
+    paint: {
+      "circle-radius": ["interpolate", ["linear"], ["zoom"], 12, 3, 16, 6],
+      "circle-color": "#ff8c00", // Оранжевый цвет для остановок
+      "circle-stroke-width": 2,
+      "circle-stroke-color": "#ffffff"
+    }
+  });
+  style.layers.push({
+    id: "transit_stops_labels",
+    type: "symbol",
+    source: "transit_stops",
+    minzoom: 15,
+    layout: {
+      "text-field": ["get", "name"],
+      "text-font": ["Metropolis Regular"],
+      "text-offset": [0, 1.2],
+      "text-anchor": "top",
+      "text-size": 11
+    },
+    paint: {
+      "text-color": "#d35400",
+      "text-halo-color": isDarkBg ? "#111111" : "#ffffff",
+      "text-halo-width": 1.5
+    }
+  });
+
+  // 6. POI ИКОНКИ
   const poiCategories = categories.filter(c => !c.isArea && !c.isLine && !c.isSpecial);
   poiCategories.forEach(cat => {
     const classFilter = cat.omtClass ? ["in", "class", ...cat.omtClass] : ["has", "class"];
@@ -529,7 +629,17 @@ const setCurrentCity = async (lat: number, lon: number) => {
   } catch (e) { currentCity.value = null; }
 };
 
-const locateUser = async () => {
+// Функция для центрирования камеры по нажатию на FAB-кнопку
+const panToUser = () => {
+  if (userLocation.value && map.value) {
+    map.value.flyTo({ center: [userLocation.value.lon, userLocation.value.lat], zoom: 16 });
+  } else {
+    locateUser(true);
+  }
+};
+
+// Инициализация геолокации. Параметр isInitial указывает, нужно ли сразу сдвинуть камеру (например, при первом запуске)
+const locateUser = async (isInitial = false) => {
   try {
     const permissions = await Geolocation.checkPermissions();
     if (permissions.location !== 'granted') {
@@ -538,16 +648,36 @@ const locateUser = async () => {
     }
     const pos = await Geolocation.getCurrentPosition({ enableHighAccuracy: true, timeout: 10000 });
     setUserLocation(pos.coords.latitude, pos.coords.longitude, pos.coords.heading ?? null);
-    routeA.value = { lat: pos.coords.latitude, lon: pos.coords.longitude };
-    routeTextA.value = 'Моё местоположение';
+    
+    // Если еще нет адреса отправления, ставим локацию пользователя
+    if (!routeA.value && !routeTextA.value) {
+       routeA.value = { lat: pos.coords.latitude, lon: pos.coords.longitude };
+       routeTextA.value = 'Моё местоположение';
+    }
+    
     await setCurrentCity(pos.coords.latitude, pos.coords.longitude);
-    updateRouteMarkers(); if (routeB.value) calculateRoute();
+    updateRouteMarkers();
+    
+    if (isInitial && map.value) {
+      map.value.flyTo({ center: [pos.coords.longitude, pos.coords.latitude], zoom: 16 });
+    }
 
-    // Start watching position for movement and heading
     if (positionWatchId.value) Geolocation.clearWatch({ id: positionWatchId.value });
     positionWatchId.value = await Geolocation.watchPosition({ enableHighAccuracy: true }, (pos, err) => {
       if (err || !pos) return;
       setUserLocation(pos.coords.latitude, pos.coords.longitude, pos.coords.heading ?? null);
+
+      // Динамическое сокращение: если мы в движении и маршрут построен от "Моё местоположение"
+      if (routeB.value && routeTextA.value === 'Моё местоположение') {
+        routeA.value = { lat: pos.coords.latitude, lon: pos.coords.longitude };
+        updateRouteMarkers();
+        
+        // Пересчитываем маршрут без скачков камеры
+        if (routeDebounceTimer) clearTimeout(routeDebounceTimer);
+        routeDebounceTimer = setTimeout(() => {
+          calculateRoute(false);
+        }, 3000);
+      }
     });
   } catch (e: any) { alert('Не удалось получить геоданные.'); }
 };
@@ -566,7 +696,7 @@ const updateRouteMode = (mode: string | number | undefined) => {
   const modeValue = String(mode);
   if (!['car', 'bus', 'bicycle', 'walk'].includes(modeValue)) return;
   routeMode.value = modeValue as 'car' | 'bus' | 'bicycle' | 'walk';
-  if (routeA.value && routeB.value) calculateRoute();
+  if (routeA.value && routeB.value) calculateRoute(false);
 };
 
 const swapRoutes = () => {
@@ -582,30 +712,26 @@ const createRouteMarkerElement = (type: 'A' | 'B') => {
 const createUserMarkerElement = () => {
   const el = document.createElement('div');
   el.className = 'user-marker';
-  el.style.transform = `rotate(${userHeading.value}deg)`;
-  el.style.transformOrigin = 'center';
+  // Больше никаких style.transform здесь! Вращением управляет сам maplibre
   if (userIconPath.value) {
     const img = document.createElement('img');
     img.src = userIconPath.value;
-    img.style.width = '40px';
-    img.style.height = '40px';
-    img.style.borderRadius = '50%';
-    img.style.border = '2px solid white';
-    img.style.boxShadow = '0 4px 8px rgba(0, 0, 0, 0.4)';
+    img.style.width = '48px';
+    img.style.height = '48px';
+    img.style.objectFit = 'contain';
+    img.style.filter = 'drop-shadow(0 4px 6px rgba(0, 0, 0, 0.4))';
     el.appendChild(img);
   } else {
-    el.innerHTML = '👤';
-    el.style.fontSize = '24px';
+    // Векторная стрелка направления (как в навигаторах)
+    el.innerHTML = `
+      <svg width="36" height="36" viewBox="0 0 32 32" xmlns="http://www.w3.org/2000/svg">
+        <path d="M16 2L30 30L16 22L2 30L16 2Z" fill="#3880ff" stroke="white" stroke-width="2" stroke-linejoin="round"/>
+      </svg>
+    `;
     el.style.display = 'flex';
     el.style.alignItems = 'center';
     el.style.justifyContent = 'center';
-    el.style.width = '40px';
-    el.style.height = '40px';
-    el.style.borderRadius = '50%';
-    el.style.backgroundColor = '#3880ff';
-    el.style.color = 'white';
-    el.style.border = '2px solid white';
-    el.style.boxShadow = '0 4px 8px rgba(0, 0, 0, 0.4)';
+    el.style.filter = 'drop-shadow(0 4px 6px rgba(0, 0, 0, 0.4))';
   }
   return el;
 };
@@ -614,11 +740,11 @@ const updateUserMarker = () => {
   const rawMap = map.value; if (!rawMap) return;
   if (userLocationMarker.value && userLocation.value) {
     userLocationMarker.value.setLngLat([userLocation.value.lon, userLocation.value.lat]);
-    const element = userLocationMarker.value.getElement();
-    element.style.transform = `rotate(${userHeading.value}deg)`;
-    element.style.transformOrigin = 'center';
+    userLocationMarker.value.setRotation(userHeading.value); // Нативное управление вращением MapLibre
   } else if (userLocation.value) {
-    userLocationMarker.value = new maplibregl.Marker({ element: createUserMarkerElement() }).setLngLat([userLocation.value.lon, userLocation.value.lat]).addTo(rawMap);
+    userLocationMarker.value = new maplibregl.Marker({ element: createUserMarkerElement(), rotation: userHeading.value })
+      .setLngLat([userLocation.value.lon, userLocation.value.lat])
+      .addTo(rawMap);
   }
 };
 
@@ -631,14 +757,57 @@ const updateRouteMarkers = () => {
 
 const clearRoute = () => {
   routeA.value = null; routeB.value = null; routeTextA.value = ''; routeTextB.value = ''; searchResults.value = [];
+  routeInfo.value = null;
+  currentRouteGeoJSON.value = null;
+  transitStopsGeoJSON.value = { type: "FeatureCollection", features: [] };
+  
   const rawMap = map.value;
   if (rawMap && rawMap.getSource('route')) (rawMap.getSource('route') as any).setData({ type: 'FeatureCollection', features: [] });
+  updateTransitStopsLayer();
+  
   if (routeMarkerA.value) routeMarkerA.value.remove(); if (routeMarkerB.value) routeMarkerB.value.remove();
   routeMarkerA.value = null; routeMarkerB.value = null;
-  stopWatchingPosition();
 };
 
-const calculateRoute = async () => {
+const updateTransitStopsLayer = () => {
+  const rawMap = map.value;
+  if (rawMap && rawMap.getSource('transit_stops')) {
+    (rawMap.getSource('transit_stops') as maplibregl.GeoJSONSource).setData(transitStopsGeoJSON.value);
+  }
+};
+
+const loadTransitStops = async () => {
+  if (!routeA.value || routeMode.value !== 'bus') {
+    transitStopsGeoJSON.value = { type: "FeatureCollection", features: [] };
+    updateTransitStopsLayer();
+    return;
+  }
+  try {
+    // API OpenStreetMap для получения остановок в радиусе 2км от точки A
+    const query = `
+      [out:json];
+      node["highway"="bus_stop"](around:2000, ${routeA.value.lat}, ${routeA.value.lon});
+      out body;
+    `;
+    const url = `https://overpass-api.de/api/interpreter?data=${encodeURIComponent(query)}`;
+    const response = await fetch(url);
+    const data = await response.json();
+
+    const features = data.elements.map((el: any) => ({
+      type: "Feature",
+      geometry: { type: "Point", coordinates: [el.lon, el.lat] },
+      properties: { name: el.tags?.name || 'Остановка' }
+    }));
+
+    transitStopsGeoJSON.value = { type: "FeatureCollection", features };
+    updateTransitStopsLayer();
+  } catch(e) {
+    console.error("Ошибка загрузки остановок", e);
+  }
+};
+
+// Параметр fitBounds предотвращает скачки камеры при автоматическом обновлении маршрута
+const calculateRoute = async (fitBounds = true) => {
   if (!routeA.value || !routeB.value || !map.value) return;
   const rawMap = map.value;
   try {
@@ -647,19 +816,49 @@ const calculateRoute = async () => {
     const data = await res.json();
     if (data.routes && data.routes.length > 0) {
       const geojson = data.routes[0].geometry;
-      // Векторные слои маршрута уже созданы в generateMapStyle, просто обновляем источник!
+      currentRouteGeoJSON.value = geojson; // Сохраняем стейт
+
       if (rawMap.getSource('route')) (rawMap.getSource('route') as any).setData(geojson);
 
-      const coordinates = geojson.coordinates;
-      const bounds = coordinates.reduce((bounds: maplibregl.LngLatBounds, coord: any) => bounds.extend(coord), new maplibregl.LngLatBounds(coordinates[0], coordinates[0]));
-      rawMap.fitBounds(bounds, { padding: 50 });
+      // Информация о маршруте
+      const distKm = (data.routes[0].distance / 1000).toFixed(1);
+      const durMin = Math.round(data.routes[0].duration / 60);
+      routeInfo.value = {
+        distance: `${distKm} км`,
+        duration: `${durMin} мин`
+      };
+
+      if (fitBounds) {
+        const coordinates = geojson.coordinates;
+        const bounds = coordinates.reduce((bounds: maplibregl.LngLatBounds, coord: any) => bounds.extend(coord), new maplibregl.LngLatBounds(coordinates[0], coordinates[0]));
+        rawMap.fitBounds(bounds, { padding: 50 });
+      }
     }
   } catch (e) { }
+
+  // Дополнительно грузим остановки, если режим автобуса
+  if (routeMode.value === 'bus') {
+    loadTransitStops();
+  } else {
+    transitStopsGeoJSON.value = { type: "FeatureCollection", features: [] };
+    updateTransitStopsLayer();
+  }
 };
 
 const routeTo = async (lat: number, lon: number, name: string) => {
   isPoiModalOpen.value = false; routeB.value = { lat, lon }; routeTextB.value = name; updateRouteMarkers();
-  if (!routeA.value) await locateUser(); else calculateRoute();
+  if (!routeA.value) {
+     if (userLocation.value) {
+       routeA.value = { lat: userLocation.value.lat, lon: userLocation.value.lon };
+       routeTextA.value = 'Моё местоположение';
+       updateRouteMarkers();
+       calculateRoute();
+     } else {
+       await locateUser(false);
+     }
+  } else {
+    calculateRoute();
+  }
 };
 
 const changeIconForPOI = async (poiId: string) => {
@@ -691,6 +890,11 @@ const changeUserIcon = async () => {
       await Filesystem.writeFile({ path: name, data: img.base64String, directory: Directory.Data });
       await Preferences.set({ key: 'user_icon_path', value: name });
       userIconPath.value = `data:image/jpeg;base64,${img.base64String}`;
+      // Удаляем старый маркер, чтобы он перерисовался с новой иконкой
+      if (userLocationMarker.value) {
+        userLocationMarker.value.remove();
+        userLocationMarker.value = null;
+      }
       updateUserMarker();
     }
   } catch (e) { }
@@ -701,6 +905,11 @@ const removeUserIcon = async () => {
   if (value) await Filesystem.deleteFile({ path: value, directory: Directory.Data });
   await Preferences.remove({ key: 'user_icon_path' });
   userIconPath.value = null;
+  // Удаляем старый маркер, чтобы он перерисовался со стрелкой по умолчанию
+  if (userLocationMarker.value) {
+    userLocationMarker.value.remove();
+    userLocationMarker.value = null;
+  }
   updateUserMarker();
 };
 
@@ -732,6 +941,10 @@ onIonViewDidEnter(async () => {
 
     rawMap.on('load', async () => {
       isLoading.value = false;
+      
+      // ИСПРАВЛЕНИЕ ПОЛНОГО ЭКРАНА:
+      setTimeout(() => { rawMap.resize(); }, 200);
+
       await initMapLibreImages(rawMap);
       const poiLayerIds = categories.filter(c => !c.isArea && !c.isLine && !c.isSpecial).map(c => `poi_${c.id}`);
       
@@ -743,13 +956,26 @@ onIonViewDidEnter(async () => {
         isPoiModalOpen.value = true;
       });
 
-      await locateUser();
+      // ИСПРАВЛЕНИЕ: Автоматически центрируемся на пользователе при первом запуске
+      await locateUser(true);
     });
   } else {
     if (map.value) {
       const rawMap = map.value;
+      setTimeout(() => { rawMap.resize(); }, 200);
       await initMapLibreImages(rawMap);
       rawMap.setStyle(generateMapStyle());
+
+      // ВОССТАНОВЛЕНИЕ СОСТОЯНИЯ: Восстанавливаем линию маршрута и остановки после ререндера стиля
+      rawMap.once('styledata', () => {
+        if (currentRouteGeoJSON.value && rawMap.getSource('route')) {
+           (rawMap.getSource('route') as maplibregl.GeoJSONSource).setData(currentRouteGeoJSON.value);
+        }
+        if (transitStopsGeoJSON.value && rawMap.getSource('transit_stops')) {
+           (rawMap.getSource('transit_stops') as maplibregl.GeoJSONSource).setData(transitStopsGeoJSON.value);
+        }
+      });
+
       if (globalIs3D.value) { rawMap.touchPitch?.enable(); rawMap.easeTo({ pitch: 45 }); } 
       else { rawMap.touchPitch?.disable(); rawMap.easeTo({ pitch: 0 }); }
     }
@@ -771,7 +997,17 @@ onIonViewDidEnter(async () => {
   position: absolute; top: 10px; left: 10px; right: 10px; 
   background: var(--ion-card-background, #ffffff); color: var(--ion-text-color, #000000);
   border-radius: 12px; padding: 12px; box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3); z-index: 1000; 
+  transition: all 0.3s ease;
 }
+.routing-panel.collapsed { padding-bottom: 12px; }
+
+.panel-header {
+  display: flex; justify-content: space-between; align-items: center; cursor: pointer;
+  font-size: 16px; margin-bottom: 8px;
+}
+.routing-panel.collapsed .panel-header { margin-bottom: 0; }
+.panel-body { margin-top: 8px; }
+
 .route-inputs { position: relative; display: flex; flex-direction: column; gap: 8px; padding-right: 40px; }
 .input-row { display: flex; align-items: center; background: var(--ion-item-background, rgba(255,255,255,0.92)); border-radius: 8px; padding: 0 8px; }
 .dot { width: 24px; font-weight: bold; font-size: 14px; text-align: center; }
@@ -783,7 +1019,20 @@ onIonViewDidEnter(async () => {
 .search-results { margin-top: 8px; max-height: 150px; overflow-y: auto; background: var(--ion-background-color, #ffffff); border: 1px solid var(--ion-color-step-150, rgba(0,0,0,0.08)); border-radius: 8px; }
 .search-item { padding: 12px; border-bottom: 1px solid var(--ion-color-step-100, rgba(0,0,0,0.04)); font-size: 14px; cursor: pointer; color: var(--ion-text-color, #000000); }
 
-.floating-status { position: absolute; bottom: 80px; left: 50%; transform: translateX(-50%); background: var(--ion-item-background, rgba(255,255,255,0.92)); color: var(--ion-text-color, #000000); padding: 6px 12px; border-radius: 20px; box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2); z-index: 1000; pointer-events: none; }
+.floating-status { position: absolute; bottom: 130px; left: 50%; transform: translateX(-50%); background: var(--ion-item-background, rgba(255,255,255,0.92)); color: var(--ion-text-color, #000000); padding: 6px 12px; border-radius: 20px; box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2); z-index: 1000; pointer-events: none; }
+
+.location-fab { margin-bottom: 80px; } /* Сдвигаем чтобы не перекрывать инфо о маршруте */
+
+/* Инфо-панель маршрута */
+.route-info-panel {
+  position: absolute; bottom: 0; left: 0; right: 0;
+  background: var(--ion-card-background, #ffffff); padding: 16px 20px;
+  border-radius: 20px 20px 0 0; box-shadow: 0 -4px 16px rgba(0,0,0,0.15); z-index: 1000;
+}
+.route-header { display: flex; align-items: baseline; margin-bottom: 4px; }
+.route-duration { margin: 0; color: var(--ion-color-primary); font-weight: bold; font-size: 24px; }
+.route-distance { color: #666; margin-left: 12px; font-size: 16px; }
+.transit-info { font-size: 12px; color: var(--ion-color-warning); margin-top: 8px; margin-bottom: 0; }
 
 :deep(.route-marker) { width: 30px; height: 30px; border-radius: 50%; color: white; display: flex; align-items: center; justify-content: center; font-weight: bold; box-shadow: 0 4px 8px rgba(0, 0, 0, 0.4); border: 2px solid white; }
 :deep(.route-marker.a) { background-color: #3880ff; }
