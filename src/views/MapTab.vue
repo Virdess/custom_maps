@@ -324,6 +324,43 @@ const updateCameraToUser = (animate = true) => {
   }
 };
 
+// --- ДВИЖОК ПЛАВНОЙ АНИМАЦИИ МАРКЕРА ---
+let markerAnimationId: number | null = null;
+
+const animateMarker = (
+  startLoc: { lat: number, lon: number }, 
+  endLoc: { lat: number, lon: number }, 
+  startH: number, 
+  endH: number, 
+  duration: number
+) => {
+  const startTime = performance.now();
+  
+  const animate = (currentTime: number) => {
+    const elapsed = currentTime - startTime;
+    const progress = Math.min(elapsed / duration, 1);
+    
+    // Линейная интерполяция координат и угла
+    const currentLat = startLoc.lat + (endLoc.lat - startLoc.lat) * progress;
+    const currentLon = startLoc.lon + (endLoc.lon - startLoc.lon) * progress;
+    const currentH = startH + (endH - startH) * progress;
+    
+    if (userLocationMarker.value) {
+      userLocationMarker.value.setLngLat([currentLon, currentLat]);
+      userLocationMarker.value.setRotation(currentH);
+    }
+    
+    if (progress < 1) {
+      markerAnimationId = requestAnimationFrame(animate);
+    }
+  };
+  
+  if (markerAnimationId) cancelAnimationFrame(markerAnimationId);
+  markerAnimationId = requestAnimationFrame(animate);
+};
+
+
+// --- ОБНОВЛЕННАЯ ФУНКЦИЯ УСТАНОВКИ ЛОКАЦИИ ---
 const setUserLocation = (lat: number, lon: number, headingFromGps: number | null): boolean => {
   const nextLocation = { lat, lon };
   const prev = userLocation.value;
@@ -334,41 +371,48 @@ const setUserLocation = (lat: number, lon: number, headingFromGps: number | null
     if (headingFromGps !== null && !isNaN(headingFromGps)) {
       userHeading.value = headingFromGps;
     }
-    updateUserMarker();
+    updateUserMarker(); // Создаем маркер моментально при первом запуске
     if (isTrackingUser.value) updateCameraToUser(false);
     return true;
   }
 
   const dist = calculateDistance(prev, nextLocation);
   let headingChanged = false;
+  let newHeading = userHeading.value;
 
-  // --- ЛОГИКА ПОВОРОТА ИЗ GPS ---
+  // Расчет нового угла из GPS
   if (headingFromGps !== null && headingFromGps !== undefined && !isNaN(headingFromGps)) {
-    const newHeading = getShortestHeading(userHeading.value, headingFromGps);
-    if (Math.abs(userHeading.value - newHeading) > 2) { // Чувствительность к микро-рывкам
-      userHeading.value = newHeading;
+    newHeading = getShortestHeading(userHeading.value, headingFromGps);
+    if (Math.abs(userHeading.value - newHeading) > 2) {
       headingChanged = true;
     }
   }
 
   if (dist > 1.0) {
-    // --- ЛОГИКА ПОВОРОТА ИЗ РАСЧЕТА КООРДИНАТ (если компас недоступен) ---
+    // Расчет угла из движения, если компас недоступен
     if ((headingFromGps === null || isNaN(headingFromGps)) && dist > 3.0) {
       const calculatedBearing = calculateBearing(prev, nextLocation);
-      userHeading.value = getShortestHeading(userHeading.value, calculatedBearing);
+      newHeading = getShortestHeading(userHeading.value, calculatedBearing);
     }
+
+    // Запускаем плавную анимацию координат и угла в JS на 800мс (синхронно с камерой)
+    animateMarker(prev, nextLocation, userHeading.value, newHeading, 800);
 
     previousUserLocation.value = prev;
     userLocation.value = nextLocation;
-    updateUserMarker();
+    userHeading.value = newHeading;
+    
     if (isTrackingUser.value) updateCameraToUser(true);
-    return true;
+    return true; 
   } else if (headingChanged) {
-    updateUserMarker();
-    if (isTrackingUser.value) updateCameraToUser(true);
+    // Если стоим на месте, но крутим телефон
+    animateMarker(prev, prev, userHeading.value, newHeading, 800);
+    userHeading.value = newHeading;
+    
+    if (isTrackingUser.value) updateCameraToUser(true); 
     return false;
   }
-
+  
   return false;
 };
 
@@ -988,6 +1032,8 @@ onIonViewDidEnter(async () => {
     }
   }
 });
+
+
 </script>
 
 <style scoped>
@@ -1156,7 +1202,6 @@ onIonViewDidEnter(async () => {
 
 :deep(.user-marker) {
   pointer-events: none;
-  transition: transform 0.8s linear;
 }
 
 :deep(.pulse-ring) {
