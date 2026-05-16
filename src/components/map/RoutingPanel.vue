@@ -38,7 +38,8 @@
       <!-- Результаты поиска -->
       <div class="search-results" v-if="results.length > 0">
         <div class="search-item" v-for="res in results" :key="res.place_id" @click="onSelectResult(res)">
-          {{ res.display_name }}
+          <span class="search-item-title">{{ res.display_name }}</span>
+          <span class="search-item-dist" v-if="res.distanceStr">{{ res.distanceStr }}</span>
         </div>
       </div>
       
@@ -68,6 +69,7 @@ const props = defineProps<{
   hasUserLocation: boolean;
   hasCustomIcon: boolean;
   currentCity: string | null;
+  userLocation?: { lat: number; lon: number } | null;
 }>();
 
 const emit = defineEmits([
@@ -99,17 +101,36 @@ const onSearch = (evt: any, field: 'A' | 'B') => {
   
   timer = setTimeout(async () => {
     try {
-      const res = await fetch(`https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(q)}&limit=8&addressdetails=1`);
+      // Передаем координаты в API для приоритета ближайших локаций
+      let url = `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(q)}&limit=10&addressdetails=1`;
+      if (props.userLocation) {
+        url += `&lat=${props.userLocation.lat}&lon=${props.userLocation.lon}`;
+      }
+      
+      const res = await fetch(url);
       const data = await res.json();
+      
       if (data && data.length > 0) {
-        const mapped = data.map((i: any) => ({
+        let mapped = data.map((i: any) => ({
           place_id: i.place_id,
           display_name: i.display_name,
           lat: parseFloat(i.lat),
           lon: parseFloat(i.lon),
-          city: i.address?.city || i.address?.town || i.address?.village || i.address?.municipality || i.address?.county || ''
+          city: i.address?.city || i.address?.town || i.address?.village || i.address?.municipality || i.address?.county || '',
+          distanceValue: 0,
+          distanceStr: ''
         }));
-        if (props.currentCity) {
+        
+        // Сортировка по дистанции и форматирование расстояния
+        if (props.userLocation) {
+          mapped.forEach((a: any) => {
+            const dist = calculateDistance(props.userLocation!.lat, props.userLocation!.lon, a.lat, a.lon);
+            a.distanceValue = dist;
+            if (dist < 1000) a.distanceStr = `${Math.round(dist)} м`;
+            else a.distanceStr = `${(dist/1000).toFixed(1)} км`;
+          });
+          mapped.sort((a: any, b: any) => a.distanceValue - b.distanceValue);
+        } else if (props.currentCity) {
           mapped.sort((a: any, b: any) => {
             const aPriority = a.city.toLowerCase() === props.currentCity?.toLowerCase() ? 0 : 1;
             const bPriority = b.city.toLowerCase() === props.currentCity?.toLowerCase() ? 0 : 1;
@@ -122,6 +143,17 @@ const onSearch = (evt: any, field: 'A' | 'B') => {
       }
     } catch (e) { results.value = []; }
   }, 600);
+};
+
+// Функция расчета дистанции по формуле гаверсинуса (в метрах)
+const calculateDistance = (lat1: number, lon1: number, lat2: number, lon2: number) => {
+  const R = 6371e3;
+  const rad = Math.PI / 180;
+  const dLat = (lat2 - lat1) * rad;
+  const dLon = (lon2 - lon1) * rad;
+  const a = Math.sin(dLat / 2) * Math.sin(dLat / 2) + Math.cos(lat1 * rad) * Math.cos(lat2 * rad) * Math.sin(dLon / 2) * Math.sin(dLon / 2);
+  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+  return R * c;
 };
 
 const onSelectResult = (item: any) => {
@@ -167,5 +199,7 @@ const onSwap = () => {
 .swap-btn { position: absolute; right: -5px; top: 50%; transform: translateY(-50%); height: 40px; }
 
 .search-results { margin-top: 8px; max-height: 150px; overflow-y: auto; background: var(--ion-background-color, #ffffff); border: 1px solid var(--ion-color-step-150, rgba(0,0,0,0.08)); border-radius: 8px; }
-.search-item { padding: 12px; border-bottom: 1px solid var(--ion-color-step-100, rgba(0,0,0,0.04)); font-size: 14px; cursor: pointer; color: var(--ion-text-color, #000000); }
+.search-item { display: flex; justify-content: space-between; align-items: center; padding: 12px; border-bottom: 1px solid var(--ion-color-step-100, rgba(0,0,0,0.04)); font-size: 14px; cursor: pointer; color: var(--ion-text-color, #000000); }
+.search-item-title { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.search-item-dist { color: var(--ion-color-medium, #888888); font-size: 12px; font-weight: bold; margin-left: 12px; white-space: nowrap; }
 </style>

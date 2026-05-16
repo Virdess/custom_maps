@@ -18,6 +18,7 @@
           :hasUserLocation="!!userLocation"
           :hasCustomIcon="!!userIconPath"
           :currentCity="currentCity"
+          :userLocation="userLocation"
           @updateRouteMode="updateRouteMode"
           @clearRoute="clearRoute"
           @changeUserIcon="changeUserIcon"
@@ -35,8 +36,10 @@
         <div id="map" class="map-container"></div>
 
         <ion-fab vertical="bottom" horizontal="end" slot="fixed" class="ion-margin location-fab">
-          <!-- Функция только для центрирования карты -->
-          <ion-fab-button @click="panToUser"><ion-icon :icon="locateOutline"></ion-icon></ion-fab-button>
+          <!-- Кнопка меняет цвет и иконку в зависимости от режима слежения (навигатора) -->
+          <ion-fab-button :color="isTrackingUser ? 'primary' : 'light'" @click="panToUser">
+            <ion-icon :icon="isTrackingUser ? navigate : locateOutline"></ion-icon>
+          </ion-fab-button>
         </ion-fab>
 
         <!-- Информационная панель о маршруте (снизу) -->
@@ -65,7 +68,7 @@
 
 <script setup lang="ts">
 import { IonPage, IonHeader, IonToolbar, IonTitle, IonContent, IonText, IonFab, IonFabButton, IonIcon, onIonViewDidEnter } from '@ionic/vue';
-import { locateOutline } from 'ionicons/icons';
+import { locateOutline, navigate } from 'ionicons/icons';
 import { ref, shallowRef, watch } from 'vue';
 import maplibregl from 'maplibre-gl';
 import 'maplibre-gl/dist/maplibre-gl.css';
@@ -147,6 +150,9 @@ const currentRouteGeoJSON = ref<any>(null);
 const transitStopsGeoJSON = ref<any>({ type: "FeatureCollection", features: [] });
 const currentCity = ref<string | null>(null);
 
+// Новая переменная: активен ли режим слежения (Навигатор)
+const isTrackingUser = ref(true);
+
 watch(routeMode, (newMode, oldMode) => {
   if (newMode !== oldMode && routeA.value && routeB.value) {
     calculateRoute(false);
@@ -191,21 +197,71 @@ const calculateDistance = (pos1: { lat: number, lon: number }, pos2: { lat: numb
   return R * c;
 };
 
-const setUserLocation = (lat: number, lon: number, headingFromGps: number | null) => {
+// Функция для плавного перемещения камеры вслед за пользователем
+const updateCameraToUser = (animate = true) => {
+  if (!map.value || !userLocation.value || !isTrackingUser.value) return;
+  const options = {
+    center: [userLocation.value.lon, userLocation.value.lat] as [number, number],
+    bearing: userHeading.value,
+    zoom: 17.5, // Приближенный вид навигатора
+    pitch: globalIs3D.value ? 60 : 0 // Сильный наклон (60 градусов) для 3D эффекта навигации
+  };
+  
+  if (animate) {
+    // Используем easeTo с линейной анимацией для плавного и непрерывного ведения по маршруту
+    map.value.easeTo({ ...options, duration: 1000, easing: (t) => t });
+  } else {
+    map.value.jumpTo(options);
+  }
+};
+
+// Обновленная функция: теперь обновляет компас даже если мы стоим на месте (для вращения карты)
+const setUserLocation = (lat: number, lon: number, headingFromGps: number | null): boolean => {
   const nextLocation = { lat, lon };
   const prev = userLocation.value;
   
+  if (!prev) {
+    // Первая инициализация локации
+    userLocation.value = nextLocation;
+    previousUserLocation.value = nextLocation;
+    if (headingFromGps !== null && !isNaN(headingFromGps)) userHeading.value = headingFromGps;
+    updateUserMarker();
+    if (isTrackingUser.value) updateCameraToUser(false);
+    return true;
+  }
+
+  const dist = calculateDistance(prev, nextLocation);
+  let headingChanged = false;
+
+  // ОБНОВЛЕНИЕ 1: Компас. Даже если мы стоим на месте (в пределах 2.5м), но повернули устройство
   if (headingFromGps !== null && headingFromGps !== undefined && !isNaN(headingFromGps)) {
-    userHeading.value = headingFromGps;
-  } else if (prev) {
-    if (calculateDistance(prev, nextLocation) > 2) {
-      userHeading.value = calculateBearing(prev, nextLocation);
+    // Игнорируем микро-колебания компаса (меньше 5 градусов)
+    if (Math.abs(userHeading.value - headingFromGps) > 5) {
+      userHeading.value = headingFromGps;
+      headingChanged = true;
     }
   }
+
+  // ОБНОВЛЕНИЕ 2: Координаты. Меняем только если реально прошли больше 2.5 метров
+  if (dist > 2.5) {
+    // Если компаса нет, вычисляем азимут по движению
+    if (headingFromGps === null || isNaN(headingFromGps)) {
+      userHeading.value = calculateBearing(prev, nextLocation);
+    }
+    
+    previousUserLocation.value = prev;
+    userLocation.value = nextLocation;
+    updateUserMarker();
+    if (isTrackingUser.value) updateCameraToUser(true);
+    return true; // Произошел реальный сдвиг позиции
+  } else if (headingChanged) {
+    // Позиция не изменилась, но изменилось направление (компас)
+    updateUserMarker();
+    if (isTrackingUser.value) updateCameraToUser(true); // Вращаем камеру
+    return false; // Сдвига не было, маршрут пересчитывать не надо
+  }
   
-  previousUserLocation.value = prev || nextLocation;
-  userLocation.value = nextLocation;
-  updateUserMarker();
+  return false;
 };
 
 const isColorDark = (color: string) => {
@@ -430,9 +486,14 @@ const setCurrentCity = async (lat: number, lon: number) => {
   } catch (e) { currentCity.value = null; }
 };
 
+// Функция привязки камеры к пользователю по нажатию кнопки
 const panToUser = () => {
-  if (userLocation.value && map.value) map.value.flyTo({ center: [userLocation.value.lon, userLocation.value.lat], zoom: 16 });
-  else locateUser(true);
+  isTrackingUser.value = true; // Включаем режим слежения
+  if (userLocation.value && map.value) {
+    updateCameraToUser(true);
+  } else {
+    locateUser(true);
+  }
 };
 
 const locateUser = async (isInitial = false) => {
@@ -443,29 +504,31 @@ const locateUser = async (isInitial = false) => {
       if (request.location !== 'granted') { alert('Предоставьте доступ к геолокации.'); return; }
     }
     
-    const pos = await Geolocation.getCurrentPosition({ enableHighAccuracy: true, timeout: 15000, maximumAge: 0 });
+    // Получаем первоначальную локацию
+    const pos = await Geolocation.getCurrentPosition({ enableHighAccuracy: true, timeout: 10000, maximumAge: 0 });
     setUserLocation(pos.coords.latitude, pos.coords.longitude, pos.coords.heading ?? null);
     
-    if (!routeA.value && !routeTextA.value) {
-       routeA.value = { lat: pos.coords.latitude, lon: pos.coords.longitude };
-       routeTextA.value = 'Моё местоположение';
-    }
+    // БОЛЬШЕ НЕТ АВТОМАТИЧЕСКОГО ЗАПОЛНЕНИЯ routeA ПРИ СТАРТЕ
     
     await setCurrentCity(pos.coords.latitude, pos.coords.longitude);
     updateRouteMarkers();
-    if (isInitial && map.value) map.value.flyTo({ center: [pos.coords.longitude, pos.coords.latitude], zoom: 16 });
+    if (isInitial && map.value) {
+      updateCameraToUser(false); // Прыгаем к пользователю при загрузке
+    }
 
     if (positionWatchId.value) Geolocation.clearWatch({ id: positionWatchId.value });
     
-    positionWatchId.value = await Geolocation.watchPosition({ enableHighAccuracy: true, timeout: 10000, maximumAge: 1000 }, (pos, err) => {
+    positionWatchId.value = await Geolocation.watchPosition({ enableHighAccuracy: true, timeout: 5000, maximumAge: 0 }, (pos, err) => {
       if (err || !pos) return;
-      setUserLocation(pos.coords.latitude, pos.coords.longitude, pos.coords.heading ?? null);
+      
+      const hasMoved = setUserLocation(pos.coords.latitude, pos.coords.longitude, pos.coords.heading ?? null);
 
-      if (routeB.value && routeTextA.value === 'Моё местоположение') {
+      if (hasMoved && routeB.value && routeTextA.value === 'Моё местоположение') {
         routeA.value = { lat: pos.coords.latitude, lon: pos.coords.longitude };
         updateRouteMarkers();
+        
         if (routeDebounceTimer) clearTimeout(routeDebounceTimer);
-        routeDebounceTimer = setTimeout(() => calculateRoute(false), 3000);
+        routeDebounceTimer = setTimeout(() => calculateRoute(false), 1500);
       }
     });
   } catch (e: any) { alert('Не удалось получить геоданные.'); }
@@ -486,6 +549,7 @@ const onPointSelected = (field: 'A' | 'B', lat: number, lon: number) => {
   
   updateRouteMarkers();
   map.value?.flyTo({ center: [lon, lat], zoom: 16 });
+  isTrackingUser.value = false; // Отключаем слежение, так как мы смотрим на точку
   if (routeA.value && routeB.value) calculateRoute();
 };
 
@@ -572,7 +636,7 @@ const calculateRoute = async (fitBounds = true) => {
       currentRouteGeoJSON.value = geojson;
       if (rawMap.getSource('route')) (rawMap.getSource('route') as any).setData(geojson);
       routeInfo.value = { distance: `${(data.routes[0].distance / 1000).toFixed(1)} км`, duration: `${Math.round(data.routes[0].duration / 60)} мин` };
-      if (fitBounds) {
+      if (fitBounds && !isTrackingUser.value) { // Центрируем весь маршрут только если мы не в режиме слежения
         const coordinates = geojson.coordinates;
         const bounds = coordinates.reduce((b: maplibregl.LngLatBounds, coord: any) => b.extend(coord), new maplibregl.LngLatBounds(coordinates[0], coordinates[0]));
         rawMap.fitBounds(bounds, { padding: 50 });
@@ -585,13 +649,23 @@ const calculateRoute = async (fitBounds = true) => {
 };
 
 const routeTo = async (lat: number, lon: number, name: string) => {
-  isPoiModalOpen.value = false; routeB.value = { lat, lon }; routeTextB.value = name; updateRouteMarkers();
+  isPoiModalOpen.value = false; 
+  routeB.value = { lat, lon }; 
+  routeTextB.value = name; 
+  
   if (!routeA.value) {
-     if (userLocation.value) {
-       routeA.value = { lat: userLocation.value.lat, lon: userLocation.value.lon };
-       routeTextA.value = 'Моё местоположение'; updateRouteMarkers(); calculateRoute();
-     } else { await locateUser(false); }
-  } else { calculateRoute(); }
+    if (!userLocation.value) {
+      await locateUser(false);
+    }
+    // Если геолокация определена, подставляем её как точку отправления по умолчанию
+    if (userLocation.value) {
+      routeA.value = { lat: userLocation.value.lat, lon: userLocation.value.lon };
+      routeTextA.value = 'Моё местоположение'; 
+    }
+  }
+  
+  updateRouteMarkers();
+  calculateRoute();
 };
 
 const changeIconForPOI = async (poiId: string) => {
@@ -649,6 +723,11 @@ onIonViewDidEnter(async () => {
     const rawMap = map.value;
     if (globalIs3D.value) rawMap.addControl(new maplibregl.NavigationControl({ visualizePitch: true }), 'bottom-right');
 
+    // Отключаем режим навигатора, когда пользователь сам трогает карту
+    rawMap.on('dragstart', () => { isTrackingUser.value = false; });
+    rawMap.on('touchstart', () => { isTrackingUser.value = false; });
+    rawMap.on('wheel', () => { isTrackingUser.value = false; });
+
     rawMap.on('load', async () => {
       isLoading.value = false;
       setTimeout(() => { rawMap.resize(); }, 200);
@@ -694,10 +773,11 @@ onIonViewDidEnter(async () => {
 
 .floating-status { position: absolute; bottom: 130px; left: 50%; transform: translateX(-50%); background: var(--ion-item-background, rgba(255,255,255,0.92)); color: var(--ion-text-color, #000000); padding: 6px 12px; border-radius: 20px; box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2); z-index: 1000; pointer-events: none; }
 
-.location-fab { margin-bottom: 80px; }
+.location-fab { margin-bottom: 80px; transition: all 0.3s ease; }
 
 :deep(.route-marker) { width: 30px; height: 30px; border-radius: 50%; color: white; display: flex; align-items: center; justify-content: center; font-weight: bold; box-shadow: 0 4px 8px rgba(0, 0, 0, 0.4); border: 2px solid white; }
 :deep(.route-marker.a) { background-color: #3880ff; }
 :deep(.route-marker.b) { background-color: #eb445a; }
-:deep(.user-marker) { pointer-events: none; transition: transform 0.15s linear; }
+/* Улучшена плавность движения маркера (ease-out делает остановку более естественной) */
+:deep(.user-marker) { pointer-events: none; transition: transform 0.3s ease-out; }
 </style>
