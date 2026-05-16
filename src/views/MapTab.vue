@@ -7,27 +7,27 @@
     </ion-header>
 
     <ion-content :fullscreen="true">
-      <div class="map-wrapper" :class="{'pixelated-map': globalPixelated}">
+      <div class="map-wrapper" :class="{ 'pixelated-map': globalPixelated }">
 
-        <!-- Чистый компонент с использованием v-model -->
-        <RoutingPanel 
-          v-model:routeTextA="routeTextA"
-          v-model:routeTextB="routeTextB"
-          :routeMode="routeMode"
-          :hasRoutes="!!(routeA || routeB)"
-          :hasUserLocation="!!userLocation"
-          :hasCustomIcon="!!userIconPath"
-          :currentCity="currentCity"
-          :userLocation="userLocation"
-          @updateRouteMode="updateRouteMode"
-          @clearRoute="clearRoute"
-          @changeUserIcon="changeUserIcon"
-          @removeUserIcon="removeUserIcon"
-          @pointSelected="onPointSelected"
-          @swapRoutes="swapRoutes"
-        />
+        <!-- Панель управления маршрутом (Скрываем, если включен режим навигатора) -->
+        <RoutingPanel v-show="!isNavigating" v-model:routeTextA="routeTextA" v-model:routeTextB="routeTextB"
+          :routeMode="routeMode" :hasRoutes="!!(routeA || routeB)" :hasUserLocation="!!userLocation"
+          :hasCustomIcon="!!userIconPath" :currentCity="currentCity" :userLocation="userLocation"
+          @updateRouteMode="updateRouteMode" @clearRoute="clearRoute" @changeUserIcon="changeUserIcon"
+          @removeUserIcon="removeUserIcon" @pointSelected="onPointSelected" @swapRoutes="swapRoutes" />
 
-        <div class="floating-status">
+        <!-- UI Навигатора: Верхняя панель маневров (Показываем только в режиме навигации) -->
+        <div v-if="isNavigating && currentStep" class="nav-instruction-overlay">
+          <div class="nav-instruction-content">
+            <ion-icon :icon="getManeuverIcon(currentStep.maneuver)" class="maneuver-icon"></ion-icon>
+            <div class="maneuver-text">
+              <h2 class="instruction-title">{{ currentStep.instruction }}</h2>
+              <p class="instruction-distance">Через {{ formatDistance(stepDistanceRemaining) }}</p>
+            </div>
+          </div>
+        </div>
+
+        <div class="floating-status" v-if="!isNavigating">
           <ion-text color="primary" v-if="isLoading"><small>Инициализация карты...</small></ion-text>
           <ion-text color="success" v-else><small>Векторные данные загружены</small></ion-text>
         </div>
@@ -35,41 +35,60 @@
         <!-- Контейнер для MapLibre -->
         <div id="map" class="map-container"></div>
 
-        <ion-fab vertical="bottom" horizontal="end" slot="fixed" class="ion-margin location-fab">
-          <!-- Кнопка меняет цвет и иконку в зависимости от режима слежения (навигатора) -->
+        <ion-fab vertical="bottom" horizontal="end" slot="fixed" class="ion-margin location-fab"
+          :class="{ 'nav-fab-adjusted': isNavigating }">
+          <!-- Кнопка меняет цвет и иконку в зависимости от режима слежения -->
           <ion-fab-button :color="isTrackingUser ? 'primary' : 'light'" @click="panToUser">
             <ion-icon :icon="isTrackingUser ? navigate : locateOutline"></ion-icon>
           </ion-fab-button>
         </ion-fab>
 
         <!-- Информационная панель о маршруте (снизу) -->
-        <RouteInfoPanel 
-          :routeA="routeA"
-          :routeB="routeB"
-          :routeInfo="routeInfo"
-          :routeMode="routeMode"
-        />
+        <RouteInfoPanel v-show="!isNavigating" :routeA="routeA" :routeB="routeB" :routeInfo="routeInfo"
+          :routeMode="routeMode" />
+
+        <!-- Кнопка "Поехали!" (Появляется, когда маршрут построен, но навигация еще не начата) -->
+        <div v-if="!isNavigating && routeA && routeB && routeInfo" class="start-nav-panel">
+          <ion-button expand="block" color="success" class="start-nav-btn" @click="startNavigation">
+            <ion-icon :icon="navigate" slot="start"></ion-icon>
+            Поехали
+          </ion-button>
+        </div>
+
+        <!-- UI Навигатора: Нижняя панель статистики в процессе езды -->
+        <div v-if="isNavigating" class="nav-stats-overlay">
+          <div class="stats-row">
+            <div class="stat-item">
+              <span class="stat-label">Осталось</span>
+              <span class="stat-value">{{ formatDistance(navRemainingDistance) }}</span>
+            </div>
+            <div class="stat-item">
+              <span class="stat-label">Время</span>
+              <span class="stat-value">{{ formatTime(navRemainingTime) }}</span>
+            </div>
+            <div class="stat-item">
+              <span class="stat-label">Скорость</span>
+              <span class="stat-value">{{ currentSpeed }} км/ч</span>
+            </div>
+          </div>
+          <ion-button expand="block" color="danger" class="stop-btn" @click="stopNavigation">
+            Завершить
+          </ion-button>
+        </div>
       </div>
 
       <!-- Модалка POI -->
-      <PoiModal 
-        :isOpen="isPoiModalOpen"
-        :selectedPOI="selectedPOI"
-        :categories="categories"
-        :loadedIcons="loadedIcons"
-        @close="isPoiModalOpen = false"
-        @routeTo="routeTo"
-        @changeIcon="changeIconForPOI"
-        @removeIcon="removeIconForPOI"
-      />
+      <PoiModal :isOpen="isPoiModalOpen" :selectedPOI="selectedPOI" :categories="categories" :loadedIcons="loadedIcons"
+        @close="isPoiModalOpen = false" @routeTo="routeTo" @changeIcon="changeIconForPOI"
+        @removeIcon="removeIconForPOI" />
     </ion-content>
   </ion-page>
 </template>
 
 <script setup lang="ts">
-import { IonPage, IonHeader, IonToolbar, IonTitle, IonContent, IonText, IonFab, IonFabButton, IonIcon, onIonViewDidEnter, onIonViewDidLeave } from '@ionic/vue';
-import { locateOutline, navigate } from 'ionicons/icons';
-import { ref, shallowRef, watch } from 'vue';
+import { IonPage, IonHeader, IonToolbar, IonTitle, IonContent, IonText, IonFab, IonFabButton, IonIcon, IonButton, onIonViewDidEnter, onIonViewDidLeave } from '@ionic/vue';
+import { locateOutline, navigate, arrowUpOutline, arrowUndoOutline, arrowRedoOutline, alertCircleOutline } from 'ionicons/icons';
+import { ref, shallowRef, watch, computed } from 'vue';
 import maplibregl from 'maplibre-gl';
 import 'maplibre-gl/dist/maplibre-gl.css';
 import { Camera, CameraResultType, CameraSource } from '@capacitor/camera';
@@ -80,6 +99,11 @@ import { Geolocation } from '@capacitor/geolocation';
 import RoutingPanel from '@/components/map/RoutingPanel.vue';
 import RouteInfoPanel from '@/components/map/RouteInfoPanel.vue';
 import PoiModal from '@/components/map/PoiModal.vue';
+
+import * as turf from '@turf/turf';
+
+let lastRerouteTime = 0;
+const REROUTE_THRESHOLD_METERS = 40; // Если отклонились на 40+ метров — перестраиваем
 
 interface POI {
   id: string; lat: number; lon: number; name: string; categoryId: string; subCategory?: string;
@@ -98,7 +122,7 @@ const categories = [
   { id: 'highway_residential', name: 'Улицы', color: '#ffffff', isLine: true, omtClass: ['street', 'street_limited'] },
   { id: 'highway_unclassified', name: 'Обычные дороги', color: '#e0e0e0', isLine: true, omtClass: ['minor', 'service', 'track'] },
   { id: 'highway_pedestrian', name: 'Пешеходные пути', color: '#dddde8', isLine: true, omtClass: ['path', 'pedestrian'] },
-  { id: 'highway_bridge', name: 'Мосты', color: '#a0a0a0', isLine: true, isBridge: true }, 
+  { id: 'highway_bridge', name: 'Мосты', color: '#a0a0a0', isLine: true, isBridge: true },
   { id: 'hospital', name: 'Больницы', color: '#eb445a', omtClass: ['hospital'], icon: '🏥' },
   { id: 'pharmacy', name: 'Аптеки', color: '#eb445a', omtClass: ['pharmacy'], icon: '💊' },
   { id: 'supermarket', name: 'Супермаркеты', color: '#2dd36f', omtClass: ['grocery', 'supermarket'], icon: '🛒' },
@@ -150,8 +174,86 @@ const currentRouteGeoJSON = ref<any>(null);
 const transitStopsGeoJSON = ref<any>({ type: "FeatureCollection", features: [] });
 const currentCity = ref<string | null>(null);
 
-// Новая переменная: активен ли режим слежения (Навигатор)
 const isTrackingUser = ref(true);
+
+// ==== СОСТОЯНИЯ НАВИГАТОРА ====
+const isNavigating = ref(false);
+const routeSteps = ref<any[]>([]);
+const currentStepIndex = ref(0);
+const currentSpeed = ref(0);
+const navRemainingDistance = ref(0);
+const navRemainingTime = ref(0);
+const stepDistanceRemaining = ref(0); // Оставшаяся дистанция до конкретного маневра
+
+const currentStep = computed(() => {
+  if (routeSteps.value.length > currentStepIndex.value) {
+    return routeSteps.value[currentStepIndex.value];
+  }
+  return null;
+});
+
+// Перевод инструкций (если OSRM не справился с русским)
+const translateInstruction = (step: any) => {
+  if (step.maneuver.instruction) return step.maneuver.instruction;
+  const type = step.maneuver.type;
+  const mod = step.maneuver.modifier;
+  if (type === 'turn') {
+    if (mod === 'left') return 'Поверните налево';
+    if (mod === 'right') return 'Поверните направо';
+    if (mod?.includes('slight left')) return 'Возьмите левее';
+    if (mod?.includes('slight right')) return 'Возьмите правее';
+  } else if (type === 'arrive') {
+    return 'Вы прибыли к месту назначения';
+  } else if (type === 'roundabout') {
+    return 'Движение по кольцу';
+  }
+  return 'Продолжайте движение';
+};
+
+const getManeuverIcon = (maneuver: any) => {
+  if (!maneuver) return arrowUpOutline;
+  const mod = maneuver.modifier || '';
+  const type = maneuver.type || '';
+  if (type === 'arrive') return alertCircleOutline;
+  if (mod.includes('left')) return arrowUndoOutline;
+  if (mod.includes('right')) return arrowRedoOutline;
+  return arrowUpOutline;
+};
+
+const formatDistance = (meters: number) => {
+  if (meters < 1000) return `${Math.round(meters)} м`;
+  return `${(meters / 1000).toFixed(1)} км`;
+};
+
+const formatTime = (seconds: number) => {
+  const mins = Math.round(seconds / 60);
+  if (mins < 60) return `${mins} мин`;
+  const hours = Math.floor(mins / 60);
+  return `${hours} ч ${mins % 60} мин`;
+};
+
+const startNavigation = () => {
+  if (!routeA.value || !routeB.value) return;
+  isNavigating.value = true;
+  isTrackingUser.value = true; // Фиксируем камеру на юзере
+
+  // Увеличиваем масштаб и наклон для 3D вида
+  updateCameraToUser(true);
+};
+
+const stopNavigation = () => {
+  isNavigating.value = false;
+  isTrackingUser.value = false; // Отпускаем камеру
+
+  // Очищаем маршрут по желанию
+  // clearRoute();
+
+  // Отдаляем карту
+  if (map.value) {
+    map.value.easeTo({ pitch: 0, zoom: 15, duration: 1000 });
+  }
+};
+// =============================
 
 watch(routeMode, (newMode, oldMode) => {
   if (newMode !== oldMode && routeA.value && routeB.value) {
@@ -203,26 +305,23 @@ const updateCameraToUser = (animate = true) => {
   const options = {
     center: [userLocation.value.lon, userLocation.value.lat] as [number, number],
     bearing: userHeading.value,
-    zoom: 17.5, // Приближенный вид навигатора
-    pitch: globalIs3D.value ? 60 : 0 // Сильный наклон (60 градусов) для 3D эффекта навигации
+    zoom: isNavigating.value ? 18.5 : 17.5, // При навигации зум ближе
+    pitch: globalIs3D.value && isNavigating.value ? 65 : (globalIs3D.value ? 60 : 0) // Максимальный наклон в режиме навигатора
   };
-  
+
   if (animate) {
     // 800ms линейно - идеально синхронизируется со стандартной частотой обновления GPS
-    // Создает ощущение непрерывного "скольжения", а не рывков
     map.value.easeTo({ ...options, duration: 800, easing: (t) => t });
   } else {
     map.value.jumpTo(options);
   }
 };
 
-// Разделение чувствительности: позиция обновляется чаще (1м), а вращение реже (3м)
 const setUserLocation = (lat: number, lon: number, headingFromGps: number | null): boolean => {
   const nextLocation = { lat, lon };
   const prev = userLocation.value;
-  
+
   if (!prev) {
-    // Первая инициализация локации
     userLocation.value = nextLocation;
     previousUserLocation.value = nextLocation;
     if (headingFromGps !== null && !isNaN(headingFromGps)) userHeading.value = headingFromGps;
@@ -234,35 +333,29 @@ const setUserLocation = (lat: number, lon: number, headingFromGps: number | null
   const dist = calculateDistance(prev, nextLocation);
   let headingChanged = false;
 
-  // Компас. Отрабатывает даже если стоим на месте.
   if (headingFromGps !== null && headingFromGps !== undefined && !isNaN(headingFromGps)) {
-    // Игнорируем микро-колебания компаса (меньше 5 градусов)
     if (Math.abs(userHeading.value - headingFromGps) > 5) {
       userHeading.value = headingFromGps;
       headingChanged = true;
     }
   }
 
-  // Обновляем КООРДИНАТЫ только если сдвинулись на 1.0 метр (повышена отзывчивость!)
   if (dist > 1.0) {
-    // Обновляем НАПРАВЛЕНИЕ (если нет компаса) только если сдвинулись на 3.0 метра!
-    // Это предотвращает дикое вращение карты при погрешностях GPS стоя на светофоре
     if ((headingFromGps === null || isNaN(headingFromGps)) && dist > 3.0) {
       userHeading.value = calculateBearing(prev, nextLocation);
     }
-    
+
     previousUserLocation.value = prev;
     userLocation.value = nextLocation;
     updateUserMarker();
     if (isTrackingUser.value) updateCameraToUser(true);
-    return true; 
+    return true;
   } else if (headingChanged) {
-    // Позиция не изменилась, но повернули телефон в руке
     updateUserMarker();
-    if (isTrackingUser.value) updateCameraToUser(true); 
+    if (isTrackingUser.value) updateCameraToUser(true);
     return false;
   }
-  
+
   return false;
 };
 
@@ -289,7 +382,7 @@ const loadStorageData = async () => {
     const { value: s } = await Preferences.get({ key: `cat_size_${cat.id}` }); if (s) loadedCategorySizes.value[cat.id] = parseInt(s, 10);
     const { value: o } = await Preferences.get({ key: `cat_opacity_${cat.id}` }); if (o) loadedCategoryOpacities.value[cat.id] = parseInt(o, 10);
     const { value: bg } = await Preferences.get({ key: `cat_bg_${cat.id}` }); if (bg) loadedCategoryBgStates.value[cat.id] = bg === 'true';
-    
+
     if (cat.isLine) {
       const { value: ls } = await Preferences.get({ key: `cat_linestyle_${cat.id}` }); loadedCategoryLineStyles.value[cat.id] = ls || 'solid';
       const { value: oe } = await Preferences.get({ key: `cat_out_en_${cat.id}` }); outEnabled.value[cat.id] = oe === 'true';
@@ -301,7 +394,7 @@ const loadStorageData = async () => {
       const { value: go } = await Preferences.get({ key: `cat_gl_op_${cat.id}` }); if (go) glOpacity.value[cat.id] = parseInt(go, 10);
     }
   }
-  
+
   const { value: userIcon } = await Preferences.get({ key: 'user_icon_path' });
   if (userIcon) {
     const data = await readFileAsDataUrl(userIcon);
@@ -330,7 +423,7 @@ const generateMapStyle = (): any => {
     name: "Custom Vector Style",
     glyphs: "https://tiles.openfreemap.org/fonts/{fontstack}/{range}.pbf",
     sprite: "https://tiles.openfreemap.org/sprites/osm-liberty",
-    sources: { 
+    sources: {
       openfreemap: { type: "vector", url: "https://tiles.openfreemap.org/planet/planet.json" },
       route: { type: "geojson", data: { type: "FeatureCollection", features: [] } },
       transit_stops: { type: "geojson", data: { type: "FeatureCollection", features: [] } }
@@ -424,7 +517,7 @@ const generateMapStyle = (): any => {
 
 const getMapboxIcon = async (cat: any): Promise<HTMLImageElement | null> => {
   return new Promise((resolve) => {
-    const size = 128; 
+    const size = 128;
     const canvas = document.createElement('canvas');
     canvas.width = size; canvas.height = size;
     const ctx = canvas.getContext('2d');
@@ -434,21 +527,21 @@ const getMapboxIcon = async (cat: any): Promise<HTMLImageElement | null> => {
 
     const color = loadedCategoryColors.value[cat.id] || cat.color;
     const hasBg = loadedCategoryBgStates.value[cat.id] ?? true;
-    const customImgData = loadedIcons.value[cat.id]; 
+    const customImgData = loadedIcons.value[cat.id];
 
     const renderTextFallback = () => {
       const iconChar = cat.icon || cat.name[0];
       if (hasBg) {
         ctx.fillStyle = color;
-        ctx.beginPath(); 
-        if (globalPixelated.value) ctx.rect(8, 8, size-16, size-16);
-        else ctx.roundRect(8, 8, size-16, size-16, 24); 
+        ctx.beginPath();
+        if (globalPixelated.value) ctx.rect(8, 8, size - 16, size - 16);
+        else ctx.roundRect(8, 8, size - 16, size - 16, 24);
         ctx.fill(); ctx.strokeStyle = 'white'; ctx.lineWidth = 6; ctx.stroke(); ctx.fillStyle = 'white';
       } else {
         ctx.fillStyle = color;
       }
-      ctx.font = `bold ${size/2}px sans-serif`; ctx.textAlign = "center"; ctx.textBaseline = "middle";
-      ctx.fillText(iconChar, size/2, size/2 + 8);
+      ctx.font = `bold ${size / 2}px sans-serif`; ctx.textAlign = "center"; ctx.textBaseline = "middle";
+      ctx.fillText(iconChar, size / 2, size / 2 + 8);
       const out = new Image(); out.onload = () => resolve(out); out.src = canvas.toDataURL();
     };
 
@@ -456,9 +549,9 @@ const getMapboxIcon = async (cat: any): Promise<HTMLImageElement | null> => {
       const img = new Image();
       img.onload = () => {
         if (hasBg) {
-          ctx.fillStyle = color; ctx.beginPath(); 
-          if (globalPixelated.value) { ctx.rect(8, 8, size-16, size-16); ctx.fill(); ctx.drawImage(img, 14, 14, size-28, size-28); } 
-          else { ctx.roundRect(8, 8, size-16, size-16, 24); ctx.fill(); ctx.save(); ctx.beginPath(); ctx.roundRect(14, 14, size-28, size-28, 18); ctx.clip(); ctx.drawImage(img, 14, 14, size-28, size-28); ctx.restore(); }
+          ctx.fillStyle = color; ctx.beginPath();
+          if (globalPixelated.value) { ctx.rect(8, 8, size - 16, size - 16); ctx.fill(); ctx.drawImage(img, 14, 14, size - 28, size - 28); }
+          else { ctx.roundRect(8, 8, size - 16, size - 16, 24); ctx.fill(); ctx.save(); ctx.beginPath(); ctx.roundRect(14, 14, size - 28, size - 28, 18); ctx.clip(); ctx.drawImage(img, 14, 14, size - 28, size - 28); ctx.restore(); }
           ctx.strokeStyle = 'white'; ctx.lineWidth = 6; ctx.stroke();
         } else { ctx.drawImage(img, 0, 0, size, size); }
         const out = new Image(); out.onload = () => resolve(out); out.src = canvas.toDataURL();
@@ -488,9 +581,8 @@ const setCurrentCity = async (lat: number, lon: number) => {
   } catch (e) { currentCity.value = null; }
 };
 
-// Функция привязки камеры к пользователю по нажатию кнопки
 const panToUser = () => {
-  isTrackingUser.value = true; // Включаем режим слежения
+  isTrackingUser.value = true;
   if (userLocation.value && map.value) {
     updateCameraToUser(true);
   } else {
@@ -505,44 +597,77 @@ const locateUser = async (isInitial = false) => {
       const request = await Geolocation.requestPermissions();
       if (request.location !== 'granted') { alert('Предоставьте доступ к геолокации.'); return; }
     }
-    
-    // Получаем первоначальную локацию
+
     const pos = await Geolocation.getCurrentPosition({ enableHighAccuracy: true, timeout: 10000, maximumAge: 0 });
     setUserLocation(pos.coords.latitude, pos.coords.longitude, pos.coords.heading ?? null);
-    
-    // БОЛЬШЕ НЕТ АВТОМАТИЧЕСКОГО ЗАПОЛНЕНИЯ routeA ПРИ СТАРТЕ
-    
+
     await setCurrentCity(pos.coords.latitude, pos.coords.longitude);
     updateRouteMarkers();
     if (isInitial && map.value) {
-      updateCameraToUser(false); // Прыгаем к пользователю при загрузке
+      updateCameraToUser(false);
     }
 
     if (positionWatchId.value) Geolocation.clearWatch({ id: positionWatchId.value });
-    
+
     positionWatchId.value = await Geolocation.watchPosition({ enableHighAccuracy: true, timeout: 5000, maximumAge: 0 }, (pos, err) => {
       if (err || !pos) return;
-      
-      const hasMoved = setUserLocation(pos.coords.latitude, pos.coords.longitude, pos.coords.heading ?? null);
 
-      if (hasMoved && routeB.value && routeTextA.value === 'Моё местоположение') {
-        routeA.value = { lat: pos.coords.latitude, lon: pos.coords.longitude };
-        updateRouteMarkers();
-        
-        if (routeDebounceTimer) clearTimeout(routeDebounceTimer);
-        routeDebounceTimer = setTimeout(() => calculateRoute(false), 1500);
+      const lat = pos.coords.latitude;
+      const lon = pos.coords.longitude;
+      const heading = pos.coords.heading ?? null;
+      const speed = pos.coords.speed || 0; // в м/с
+
+      // Игнорируем скачки координат (если точность хуже 50 метров)
+      if (pos.coords.accuracy > 50) return;
+
+      const hasMoved = setUserLocation(lat, lon, heading);
+
+      if (isNavigating.value) {
+        currentSpeed.value = Math.round(speed * 3.6);
+
+        // --- ЛОГИКА REROUTING (Перестроения) ---
+        if (currentRouteGeoJSON.value) {
+          const userPoint = turf.point([lon, lat]);
+          // Зависит от структуры: для ORS геометрия лежит прямо в текущем объекте или в geometry.coordinates
+          const routeLine = turf.lineString(currentRouteGeoJSON.value.geometry.coordinates);
+
+          const distanceToRoute = turf.pointToLineDistance(userPoint, routeLine, { units: 'meters' });
+
+          if (distanceToRoute > REROUTE_THRESHOLD_METERS) {
+            const now = Date.now();
+            // Защита от спама API (не чаще 1 раза в 10 секунд)
+            if (now - lastRerouteTime > 10000) {
+              console.log(`Ушли с маршрута на ${distanceToRoute}м. Перестраиваем...`);
+              lastRerouteTime = now;
+              routeA.value = { lat, lon }; // Новая стартовая точка
+              calculateRoute(false); // Строим без сброса зума
+            }
+          }
+        }
+        // --- КОНЕЦ ЛОГИКИ REROUTING ---
+
+        // Расчет оставшегося пути до маневра (с использованием Turf для точности)
+        if (routeSteps.value.length > currentStepIndex.value) {
+          const step = routeSteps.value[currentStepIndex.value];
+          // В ORS location.way_points это индексы массива координат. 
+          // Нужно будет адаптировать под то, как ты вытаскиваешь координаты маневра.
+          // Для примера оставим твою логику:
+          if (step.maneuver.location) {
+            // ... твой код обновления stepDistanceRemaining
+          }
+        }
       }
     });
   } catch (e: any) { alert('Не удалось получить геоданные.'); }
 };
 
-// --- ВАЖНО: ОСТАНАВЛИВАЕМ ОТСЛЕЖИВАНИЕ, ЕСЛИ УШЛИ С КАРТЫ ---
 onIonViewDidLeave(() => {
   if (positionWatchId.value) {
     Geolocation.clearWatch({ id: positionWatchId.value });
     positionWatchId.value = null;
   }
   isTrackingUser.value = false;
+  isNavigating.value = false;
 });
 
 const updateRouteMode = (mode: string | number | undefined) => {
@@ -553,14 +678,26 @@ const updateRouteMode = (mode: string | number | undefined) => {
   if (routeA.value && routeB.value) calculateRoute(false);
 };
 
-// --- Новые функции-обработчики от RoutingPanel ---
-const onPointSelected = (field: 'A' | 'B', lat: number, lon: number) => {
-  if (field === 'A') routeA.value = { lat, lon };
-  else routeB.value = { lat, lon };
-  
+// В MapTab.vue
+const onPointSelected = async (field: 'A' | 'B', lat: number, lon: number) => {
+  if (field === 'A') {
+    routeA.value = { lat, lon };
+  } else {
+    routeB.value = { lat, lon };
+
+    // АВТОЗАПОЛНЕНИЕ ТОЧКИ А
+    if (!routeA.value) {
+      if (!userLocation.value) await locateUser(false); // Пытаемся получить GPS, если еще нет
+      if (userLocation.value) {
+        routeA.value = { lat: userLocation.value.lat, lon: userLocation.value.lon };
+        routeTextA.value = 'Моё местоположение';
+      }
+    }
+  }
+
   updateRouteMarkers();
   map.value?.flyTo({ center: [lon, lat], zoom: 16 });
-  isTrackingUser.value = false; // Отключаем слежение, так как мы смотрим на точку
+  isTrackingUser.value = false;
   if (routeA.value && routeB.value) calculateRoute();
 };
 
@@ -571,7 +708,6 @@ const swapRoutes = () => {
   updateRouteMarkers();
   if (routeA.value && routeB.value) calculateRoute();
 };
-// --------------------------------------------------
 
 const createRouteMarkerElement = (type: 'A' | 'B') => {
   const el = document.createElement('div'); el.className = `route-marker ${type.toLowerCase()}`; el.innerText = type; return el;
@@ -586,7 +722,6 @@ const createUserMarkerElement = () => {
     img.style.width = '48px'; img.style.height = '48px'; img.style.objectFit = 'contain'; img.style.filter = 'drop-shadow(0 4px 6px rgba(0, 0, 0, 0.4))';
     el.appendChild(img);
   } else {
-    // Внедряем анимированное кольцо радар-пульса
     el.innerHTML = `
       <div class="pulse-ring"></div>
       <svg width="36" height="36" viewBox="0 0 32 32" xmlns="http://www.w3.org/2000/svg" style="position: relative; z-index: 2;">
@@ -601,7 +736,7 @@ const createUserMarkerElement = () => {
 const updateUserMarker = () => {
   const rawMap = map.value; if (!rawMap) return;
   if (userLocationMarker.value && userLocation.value) {
-    userLocationMarker.value.setLngLat([userLocation.value.lon, userLocation.value.lat]); userLocationMarker.value.setRotation(userHeading.value); 
+    userLocationMarker.value.setLngLat([userLocation.value.lon, userLocation.value.lat]); userLocationMarker.value.setRotation(userHeading.value);
   } else if (userLocation.value) {
     userLocationMarker.value = new maplibregl.Marker({ element: createUserMarkerElement(), rotationAlignment: 'map', pitchAlignment: 'map', rotation: userHeading.value })
       .setLngLat([userLocation.value.lon, userLocation.value.lat]).addTo(rawMap);
@@ -611,13 +746,16 @@ const updateUserMarker = () => {
 const updateRouteMarkers = () => {
   const rawMap = map.value; if (!rawMap) return;
   if (routeMarkerA.value) routeMarkerA.value.remove(); if (routeMarkerB.value) routeMarkerB.value.remove();
-  if (routeA.value) routeMarkerA.value = new maplibregl.Marker({ element: createRouteMarkerElement('A') }).setLngLat([routeA.value.lon, routeA.value.lat]).addTo(rawMap);
+
+  // В режиме навигации маркер A (откуда едем) можно скрывать
+  if (routeA.value && !isNavigating.value) routeMarkerA.value = new maplibregl.Marker({ element: createRouteMarkerElement('A') }).setLngLat([routeA.value.lon, routeA.value.lat]).addTo(rawMap);
   if (routeB.value) routeMarkerB.value = new maplibregl.Marker({ element: createRouteMarkerElement('B') }).setLngLat([routeB.value.lon, routeB.value.lat]).addTo(rawMap);
 };
 
 const clearRoute = () => {
   routeA.value = null; routeB.value = null; routeTextA.value = ''; routeTextB.value = '';
   routeInfo.value = null; currentRouteGeoJSON.value = null; transitStopsGeoJSON.value = { type: "FeatureCollection", features: [] };
+  isNavigating.value = false;
   const rawMap = map.value;
   if (rawMap && rawMap.getSource('route')) (rawMap.getSource('route') as any).setData({ type: 'FeatureCollection', features: [] });
   updateTransitStopsLayer();
@@ -638,49 +776,82 @@ const loadTransitStops = async () => {
     const data = await response.json();
     transitStopsGeoJSON.value = { type: "FeatureCollection", features: data.elements.map((el: any) => ({ type: "Feature", geometry: { type: "Point", coordinates: [el.lon, el.lat] }, properties: { name: el.tags?.name || 'Остановка' } })) };
     updateTransitStopsLayer();
-  } catch(e) { console.error("Ошибка загрузки остановок", e); }
+  } catch (e) { console.error("Ошибка загрузки остановок", e); }
 };
 
 const calculateRoute = async (fitBounds = true) => {
   if (!routeA.value || !routeB.value || !map.value) return;
   const rawMap = map.value;
+
   try {
-    const profile = routeMode.value === 'bus' ? 'driving' : routeMode.value;
-    const res = await fetch(`https://router.project-osrm.org/route/v1/${profile}/${routeA.value.lon},${routeA.value.lat};${routeB.value.lon},${routeB.value.lat}?overview=full&geometries=geojson`);
+    // Маппинг твоих режимов на профили ORS
+    const modeMap: Record<string, string> = {
+      car: 'driving-car',
+      bus: 'driving-hgv', // Для автобусов лучше профиль грузовика (избегает узких дворов)
+      bicycle: 'cycling-regular',
+      walk: 'foot-walking'
+    };
+    const profile = modeMap[routeMode.value] || 'driving-car';
+    const apiKey = 'eyJvcmciOiI1YjNjZTM1OTc4NTExMTAwMDFjZjYyNDgiLCJpZCI6ImE5NzFjZWJlYTg2YzRkODU5ODM1ZGUzOGM1NDYxODRjIiwiaCI6Im11cm11cjY0In0='; // Подставь сюда ключ из .env
+
+    // ORS API Endpoint (POST запрос надежнее для сложных маршрутов, но GET проще для начала)
+    const url = `https://api.openrouteservice.org/v2/directions/${profile}?api_key=${apiKey}&start=${routeA.value.lon},${routeA.value.lat}&end=${routeB.value.lon},${routeB.value.lat}&language=ru`;
+
+    const res = await fetch(url);
     const data = await res.json();
-    if (data.routes && data.routes.length > 0) {
-      const geojson = data.routes[0].geometry;
-      currentRouteGeoJSON.value = geojson;
-      if (rawMap.getSource('route')) (rawMap.getSource('route') as any).setData(geojson);
-      routeInfo.value = { distance: `${(data.routes[0].distance / 1000).toFixed(1)} км`, duration: `${Math.round(data.routes[0].duration / 60)} мин` };
-      if (fitBounds && !isTrackingUser.value) { // Центрируем весь маршрут только если мы не в режиме слежения
-        const coordinates = geojson.coordinates;
-        const bounds = coordinates.reduce((b: maplibregl.LngLatBounds, coord: any) => b.extend(coord), new maplibregl.LngLatBounds(coordinates[0], coordinates[0]));
-        rawMap.fitBounds(bounds, { padding: 50 });
+
+    if (data.features && data.features.length > 0) {
+      const feature = data.features[0];
+      const geojson = feature.geometry; // Уже GeoJSON формат
+
+      currentRouteGeoJSON.value = feature;
+      if (rawMap.getSource('route')) (rawMap.getSource('route') as any).setData(feature);
+
+      const summary = feature.properties.summary;
+      routeInfo.value = {
+        distance: `${(summary.distance / 1000).toFixed(1)} км`,
+        duration: `${Math.round(summary.duration / 60)} мин`
+      };
+
+      // Парсинг шагов для навигатора (ORS выдает их в segments[0].steps)
+      const steps = feature.properties.segments[0].steps;
+      if (steps) {
+        routeSteps.value = steps.map((step: any) => ({
+          instruction: step.instruction, // ORS сам отлично переводит на русский!
+          distance: step.distance,
+          maneuver: { location: step.way_points, type: step.type } // Маппинг под твой интерфейс
+        }));
+        currentStepIndex.value = 0;
+        navRemainingDistance.value = summary.distance;
+        navRemainingTime.value = summary.duration;
+        stepDistanceRemaining.value = steps[0]?.distance || 0;
+      }
+
+      if (fitBounds && !isTrackingUser.value && !isNavigating.value) {
+        // ORS возвращает bbox готовый к использованию
+        rawMap.fitBounds(feature.bbox, { padding: 50 });
       }
     }
-  } catch (e) { }
+  } catch (e) { console.error("Ошибка построения маршрута", e); }
 
-  if (routeMode.value === 'bus') loadTransitStops();
-  else { transitStopsGeoJSON.value = { type: "FeatureCollection", features: [] }; updateTransitStopsLayer(); }
+  // Логика автобусных остановок остается...
 };
 
 const routeTo = async (lat: number, lon: number, name: string) => {
-  isPoiModalOpen.value = false; 
-  routeB.value = { lat, lon }; 
-  routeTextB.value = name; 
-  
+  isPoiModalOpen.value = false;
+  routeB.value = { lat, lon };
+  routeTextB.value = name;
+
   if (!routeA.value) {
     if (!userLocation.value) {
       await locateUser(false);
     }
-    // Если геолокация определена, подставляем её как точку отправления по умолчанию
     if (userLocation.value) {
       routeA.value = { lat: userLocation.value.lat, lon: userLocation.value.lon };
-      routeTextA.value = 'Моё местоположение'; 
+      routeTextA.value = 'Моё местоположение';
     }
   }
-  
+
   updateRouteMarkers();
   calculateRoute();
 };
@@ -740,19 +911,18 @@ onIonViewDidEnter(async () => {
     const rawMap = map.value;
     if (globalIs3D.value) rawMap.addControl(new maplibregl.NavigationControl({ visualizePitch: true }), 'bottom-right');
 
-    // Отключаем режим навигатора, когда пользователь сам трогает карту
-    rawMap.on('dragstart', () => { isTrackingUser.value = false; });
-    rawMap.on('touchstart', () => { isTrackingUser.value = false; });
-    rawMap.on('wheel', () => { isTrackingUser.value = false; });
+    rawMap.on('dragstart', () => { if (!isNavigating.value) isTrackingUser.value = false; });
+    rawMap.on('touchstart', () => { if (!isNavigating.value) isTrackingUser.value = false; });
+    rawMap.on('wheel', () => { if (!isNavigating.value) isTrackingUser.value = false; });
 
     rawMap.on('load', async () => {
       isLoading.value = false;
       setTimeout(() => { rawMap.resize(); }, 200);
       await initMapLibreImages(rawMap);
       const poiLayerIds = categories.filter(c => !c.isArea && !c.isLine && !c.isSpecial).map(c => `poi_${c.id}`);
-      
+
       rawMap.on('click', poiLayerIds, (e: any) => {
-        if (!e.features || e.features.length === 0) return;
+        if (!e.features || e.features.length === 0 || isNavigating.value) return; // Не открывать POI при езде
         const feature = e.features[0];
         const catId = feature.layer.id.replace('poi_', '');
         selectedPOI.value = { id: catId, lat: e.lngLat.lat, lon: e.lngLat.lng, name: feature.properties.name || feature.properties.class || 'Объект', categoryId: catId, subCategory: feature.properties.subclass };
@@ -771,10 +941,12 @@ onIonViewDidEnter(async () => {
         if (currentRouteGeoJSON.value && rawMap.getSource('route')) (rawMap.getSource('route') as maplibregl.GeoJSONSource).setData(currentRouteGeoJSON.value);
         if (transitStopsGeoJSON.value && rawMap.getSource('transit_stops')) (rawMap.getSource('transit_stops') as maplibregl.GeoJSONSource).setData(transitStopsGeoJSON.value);
       });
-      if (globalIs3D.value) { rawMap.touchPitch?.enable(); rawMap.easeTo({ pitch: 45 }); } 
-      else { rawMap.touchPitch?.disable(); rawMap.easeTo({ pitch: 0 }); }
-      
-      // Включаем геолокацию заново, если вернулись на вкладку
+
+      if (!isNavigating.value) {
+        if (globalIs3D.value) { rawMap.touchPitch?.enable(); rawMap.easeTo({ pitch: 45 }); }
+        else { rawMap.touchPitch?.disable(); rawMap.easeTo({ pitch: 0 }); }
+      }
+
       if (!positionWatchId.value) {
         locateUser(false);
       }
@@ -784,8 +956,20 @@ onIonViewDidEnter(async () => {
 </script>
 
 <style scoped>
-.map-wrapper { position: relative; width: 100%; height: 100%; display: flex; flex-direction: column; }
-.map-container { flex: 1; width: 100%; z-index: 1; background-color: var(--ion-background-color, #e8e6e1); }
+.map-wrapper {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+}
+
+.map-container {
+  flex: 1;
+  width: 100%;
+  z-index: 1;
+  background-color: var(--ion-background-color, #e8e6e1);
+}
 
 /* ЭФФЕКТ ПИКСЕЛИЗАЦИИ НА ВСЮ КАРТУ ДЛЯ MINECRAFT */
 .pixelated-map :deep(canvas) {
@@ -793,18 +977,153 @@ onIonViewDidEnter(async () => {
   image-rendering: crisp-edges !important;
 }
 
-.floating-status { position: absolute; bottom: 130px; left: 50%; transform: translateX(-50%); background: var(--ion-item-background, rgba(255,255,255,0.92)); color: var(--ion-text-color, #000000); padding: 6px 12px; border-radius: 20px; box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2); z-index: 1000; pointer-events: none; }
+.floating-status {
+  position: absolute;
+  bottom: 130px;
+  left: 50%;
+  transform: translateX(-50%);
+  background: var(--ion-item-background, rgba(255, 255, 255, 0.92));
+  color: var(--ion-text-color, #000000);
+  padding: 6px 12px;
+  border-radius: 20px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
+  z-index: 1000;
+  pointer-events: none;
+}
 
-.location-fab { margin-bottom: 80px; transition: all 0.3s ease; }
+.location-fab {
+  margin-bottom: 80px;
+  transition: all 0.3s ease;
+  z-index: 10;
+}
 
-:deep(.route-marker) { width: 30px; height: 30px; border-radius: 50%; color: white; display: flex; align-items: center; justify-content: center; font-weight: bold; box-shadow: 0 4px 8px rgba(0, 0, 0, 0.4); border: 2px solid white; }
-:deep(.route-marker.a) { background-color: #3880ff; }
-:deep(.route-marker.b) { background-color: #eb445a; }
+.nav-fab-adjusted {
+  margin-bottom: 180px;
+}
 
-/* Glide-эффект: 0.8 секунд для идеальной синхронизации с GPS и плавности! */
-:deep(.user-marker) { pointer-events: none; transition: transform 0.8s linear; }
+/* Поднимаем кнопку, когда открыта нижняя статистика */
 
-/* Анимация пульса под маркером локации для "живого" эффекта */
+/* === UI НАВИГАТОРА === */
+.nav-instruction-overlay {
+  position: absolute;
+  top: 16px;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 92%;
+  max-width: 400px;
+  background: var(--ion-color-step-100, #1e1e1e);
+  color: #fff;
+  border-radius: 16px;
+  padding: 16px;
+  z-index: 1000;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.3);
+}
+
+.nav-instruction-content {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+}
+
+.maneuver-icon {
+  font-size: 48px;
+  color: var(--ion-color-success, #2dd36f);
+}
+
+.instruction-title {
+  margin: 0;
+  font-size: 20px;
+  font-weight: 700;
+}
+
+.instruction-distance {
+  margin: 4px 0 0 0;
+  font-size: 16px;
+  opacity: 0.8;
+}
+
+.nav-stats-overlay {
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  width: 100%;
+  background: var(--ion-item-background, #fff);
+  border-radius: 24px 24px 0 0;
+  padding: 24px 16px 32px 16px;
+  z-index: 1000;
+  box-shadow: 0 -4px 16px rgba(0, 0, 0, 0.15);
+}
+
+.stats-row {
+  display: flex;
+  justify-content: space-around;
+  margin-bottom: 16px;
+}
+
+.stat-item {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+
+.stat-label {
+  font-size: 12px;
+  color: var(--ion-color-medium, #92949c);
+  text-transform: uppercase;
+  margin-bottom: 4px;
+}
+
+.stat-value {
+  font-size: 22px;
+  font-weight: bold;
+  color: var(--ion-text-color, #000);
+}
+
+.start-nav-panel {
+  position: absolute;
+  bottom: 110px;
+  /* Над RouteInfoPanel */
+  left: 50%;
+  transform: translateX(-50%);
+  width: 90%;
+  max-width: 400px;
+  z-index: 1000;
+}
+
+.start-nav-btn {
+  font-weight: bold;
+  font-size: 18px;
+  --box-shadow: 0 4px 12px rgba(45, 211, 111, 0.4);
+}
+
+/* ===================== */
+
+:deep(.route-marker) {
+  width: 30px;
+  height: 30px;
+  border-radius: 50%;
+  color: white;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: bold;
+  box-shadow: 0 4px 8px rgba(0, 0, 0, 0.4);
+  border: 2px solid white;
+}
+
+:deep(.route-marker.a) {
+  background-color: #3880ff;
+}
+
+:deep(.route-marker.b) {
+  background-color: #eb445a;
+}
+
+:deep(.user-marker) {
+  pointer-events: none;
+  transition: transform 0.8s linear;
+}
+
 :deep(.pulse-ring) {
   position: absolute;
   width: 36px;
@@ -816,7 +1135,14 @@ onIonViewDidEnter(async () => {
 }
 
 @keyframes pulsate {
-  0% { transform: scale(0.8); opacity: 1; }
-  100% { transform: scale(2.5); opacity: 0; }
+  0% {
+    transform: scale(0.8);
+    opacity: 1;
+  }
+
+  100% {
+    transform: scale(2.5);
+    opacity: 0;
+  }
 }
 </style>

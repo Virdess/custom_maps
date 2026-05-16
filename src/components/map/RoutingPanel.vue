@@ -101,48 +101,54 @@ const onSearch = (evt: any, field: 'A' | 'B') => {
   
   timer = setTimeout(async () => {
     try {
-      // Передаем координаты в API для приоритета ближайших локаций
-      let url = `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(q)}&limit=10&addressdetails=1`;
+      // Испольузем Photon: он понимает опечатки (fuzzy) и учитывает близость (lat/lon)
+      let url = `https://photon.komoot.io/api/?q=${encodeURIComponent(q)}&limit=10`;
+      
+      // Добавляем приоритет (bias) по текущей локации пользователя
       if (props.userLocation) {
-        url += `&lat=${props.userLocation.lat}&lon=${props.userLocation.lon}`;
+        url += `&lon=${props.userLocation.lon}&lat=${props.userLocation.lat}`;
       }
       
       const res = await fetch(url);
       const data = await res.json();
       
-      if (data && data.length > 0) {
-        let mapped = data.map((i: any) => ({
-          place_id: i.place_id,
-          display_name: i.display_name,
-          lat: parseFloat(i.lat),
-          lon: parseFloat(i.lon),
-          city: i.address?.city || i.address?.town || i.address?.village || i.address?.municipality || i.address?.county || '',
-          distanceValue: 0,
-          distanceStr: ''
-        }));
+      if (data && data.features && data.features.length > 0) {
+        let mapped = data.features.map((f: any) => {
+          const props = f.properties;
+          const coords = f.geometry.coordinates; // [lon, lat]
+          
+          // Собираем читаемое имя
+          const name = [props.name, props.street, props.housenumber].filter(Boolean).join(', ');
+          const city = props.city || props.town || props.village || props.state || '';
+          const display_name = name ? `${name} (${city})` : city;
+
+          return {
+            place_id: props.osm_id,
+            display_name: display_name || 'Неизвестное место',
+            lat: coords[1],
+            lon: coords[0],
+            city: city,
+            distanceValue: 0,
+            distanceStr: ''
+          };
+        });
         
-        // Сортировка по дистанции и форматирование расстояния
+        // Оставляем твою логику расчета дистанции и сортировки
         if (props.userLocation) {
           mapped.forEach((a: any) => {
             const dist = calculateDistance(props.userLocation!.lat, props.userLocation!.lon, a.lat, a.lon);
             a.distanceValue = dist;
-            if (dist < 1000) a.distanceStr = `${Math.round(dist)} м`;
-            else a.distanceStr = `${(dist/1000).toFixed(1)} км`;
+            a.distanceStr = dist < 1000 ? `${Math.round(dist)} м` : `${(dist/1000).toFixed(1)} км`;
           });
           mapped.sort((a: any, b: any) => a.distanceValue - b.distanceValue);
-        } else if (props.currentCity) {
-          mapped.sort((a: any, b: any) => {
-            const aPriority = a.city.toLowerCase() === props.currentCity?.toLowerCase() ? 0 : 1;
-            const bPriority = b.city.toLowerCase() === props.currentCity?.toLowerCase() ? 0 : 1;
-            return aPriority - bPriority;
-          });
         }
+        
         results.value = mapped;
       } else {
         results.value = [];
       }
     } catch (e) { results.value = []; }
-  }, 600);
+  }, 400); // Немного уменьшили debounce для отзывчивости
 };
 
 // Функция расчета дистанции по формуле гаверсинуса (в метрах)

@@ -25,7 +25,7 @@ const routes: Array<RouteRecordRaw> = [
       },
       {
         path: 'profile',
-        component: () => import('../views/ProfileTab.vue')
+        component: () => import('../views/PresetsTab.vue')
       }
     ]
   }
