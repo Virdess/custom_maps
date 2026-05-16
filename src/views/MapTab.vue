@@ -328,33 +328,33 @@ const updateCameraToUser = (animate = true) => {
 let markerAnimationId: number | null = null;
 
 const animateMarker = (
-  startLoc: { lat: number, lon: number }, 
-  endLoc: { lat: number, lon: number }, 
-  startH: number, 
-  endH: number, 
+  startLoc: { lat: number, lon: number },
+  endLoc: { lat: number, lon: number },
+  startH: number,
+  endH: number,
   duration: number
 ) => {
   const startTime = performance.now();
-  
+
   const animate = (currentTime: number) => {
     const elapsed = currentTime - startTime;
     const progress = Math.min(elapsed / duration, 1);
-    
+
     // Линейная интерполяция координат и угла
     const currentLat = startLoc.lat + (endLoc.lat - startLoc.lat) * progress;
     const currentLon = startLoc.lon + (endLoc.lon - startLoc.lon) * progress;
     const currentH = startH + (endH - startH) * progress;
-    
+
     if (userLocationMarker.value) {
       userLocationMarker.value.setLngLat([currentLon, currentLat]);
       userLocationMarker.value.setRotation(currentH);
     }
-    
+
     if (progress < 1) {
       markerAnimationId = requestAnimationFrame(animate);
     }
   };
-  
+
   if (markerAnimationId) cancelAnimationFrame(markerAnimationId);
   markerAnimationId = requestAnimationFrame(animate);
 };
@@ -401,18 +401,18 @@ const setUserLocation = (lat: number, lon: number, headingFromGps: number | null
     previousUserLocation.value = prev;
     userLocation.value = nextLocation;
     userHeading.value = newHeading;
-    
+
     if (isTrackingUser.value) updateCameraToUser(true);
-    return true; 
+    return true;
   } else if (headingChanged) {
     // Если стоим на месте, но крутим телефон
     animateMarker(prev, prev, userHeading.value, newHeading, 800);
     userHeading.value = newHeading;
-    
-    if (isTrackingUser.value) updateCameraToUser(true); 
+
+    if (isTrackingUser.value) updateCameraToUser(true);
     return false;
   }
-  
+
   return false;
 };
 
@@ -664,18 +664,38 @@ const locateUser = async (isInitial = false) => {
       updateCameraToUser(false);
     }
 
-    if (positionWatchId.value) Geolocation.clearWatch({ id: positionWatchId.value });
+    if (positionWatchId.value) {
+      Geolocation.clearWatch({ id: positionWatchId.value });
+    }
 
-    positionWatchId.value = await Geolocation.watchPosition({ enableHighAccuracy: true, timeout: 5000, maximumAge: 0 }, (pos, err) => {
-      if (err || !pos) return;
+    positionWatchId.value = await Geolocation.watchPosition({
+      enableHighAccuracy: true,
+      timeout: 15000, // Увеличили до 15 секунд. Позволяет пережить тоннели и кратковременную потерю сигнала
+      maximumAge: 3000 // Разрешаем брать кэшированную точку не старше 3 секунд (снижает нагрузку)
+    }, (pos, err) => {
+      if (err) {
+        console.warn('Потерян сигнал GPS или произошла ошибка:', err);
+        // Очищаем зависший watcher
+        if (positionWatchId.value) {
+          Geolocation.clearWatch({ id: positionWatchId.value });
+          positionWatchId.value = null;
+        }
+        // Пытаемся перезапустить трекинг через 3 секунды, если мы всё ещё в режиме отслеживания
+        if (isTrackingUser.value || isNavigating.value) {
+          setTimeout(() => locateUser(false), 3000);
+        }
+        return;
+      }
+
+      if (!pos) return;
 
       const lat = pos.coords.latitude;
       const lon = pos.coords.longitude;
       const heading = pos.coords.heading ?? null;
-      const speed = pos.coords.speed || 0; // в м/с
+      const speed = pos.coords.speed || 0;
 
-      // Игнорируем скачки координат (если точность хуже 50 метров)
-      if (pos.coords.accuracy > 50) return;
+      // Игнорируем лютые скачки координат (если точность хуже 100 метров, это просто шум вышек сотовой связи)
+      if (pos.coords.accuracy > 100) return;
 
       const hasMoved = setUserLocation(lat, lon, heading);
 
