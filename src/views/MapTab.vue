@@ -210,6 +210,13 @@ const translateInstruction = (step: any) => {
   return 'Продолжайте движение';
 };
 
+const getShortestHeading = (current: number, target: number) => {
+  let diff = target - (current % 360);
+  if (diff > 180) diff -= 360;
+  if (diff < -180) diff += 360;
+  return current + diff;
+};
+
 const getManeuverIcon = (maneuver: any) => {
   if (!maneuver) return arrowUpOutline;
   const mod = maneuver.modifier || '';
@@ -324,7 +331,9 @@ const setUserLocation = (lat: number, lon: number, headingFromGps: number | null
   if (!prev) {
     userLocation.value = nextLocation;
     previousUserLocation.value = nextLocation;
-    if (headingFromGps !== null && !isNaN(headingFromGps)) userHeading.value = headingFromGps;
+    if (headingFromGps !== null && !isNaN(headingFromGps)) {
+      userHeading.value = headingFromGps;
+    }
     updateUserMarker();
     if (isTrackingUser.value) updateCameraToUser(false);
     return true;
@@ -333,16 +342,20 @@ const setUserLocation = (lat: number, lon: number, headingFromGps: number | null
   const dist = calculateDistance(prev, nextLocation);
   let headingChanged = false;
 
+  // --- ЛОГИКА ПОВОРОТА ИЗ GPS ---
   if (headingFromGps !== null && headingFromGps !== undefined && !isNaN(headingFromGps)) {
-    if (Math.abs(userHeading.value - headingFromGps) > 5) {
-      userHeading.value = headingFromGps;
+    const newHeading = getShortestHeading(userHeading.value, headingFromGps);
+    if (Math.abs(userHeading.value - newHeading) > 2) { // Чувствительность к микро-рывкам
+      userHeading.value = newHeading;
       headingChanged = true;
     }
   }
 
   if (dist > 1.0) {
+    // --- ЛОГИКА ПОВОРОТА ИЗ РАСЧЕТА КООРДИНАТ (если компас недоступен) ---
     if ((headingFromGps === null || isNaN(headingFromGps)) && dist > 3.0) {
-      userHeading.value = calculateBearing(prev, nextLocation);
+      const calculatedBearing = calculateBearing(prev, nextLocation);
+      userHeading.value = getShortestHeading(userHeading.value, calculatedBearing);
     }
 
     previousUserLocation.value = prev;
@@ -639,8 +652,9 @@ const locateUser = async (isInitial = false) => {
             if (now - lastRerouteTime > 10000) {
               console.log(`Ушли с маршрута на ${distanceToRoute}м. Перестраиваем...`);
               lastRerouteTime = now;
-              routeA.value = { lat, lon }; // Новая стартовая точка
-              calculateRoute(false); // Строим без сброса зума
+              routeA.value = { lat, lon };
+              updateRouteMarkers(); // Обновляем положение синего маркера А
+              calculateRoute(false);
             }
           }
         }
@@ -652,8 +666,29 @@ const locateUser = async (isInitial = false) => {
           // В ORS location.way_points это индексы массива координат. 
           // Нужно будет адаптировать под то, как ты вытаскиваешь координаты маневра.
           // Для примера оставим твою логику:
-          if (step.maneuver.location) {
-            // ... твой код обновления stepDistanceRemaining
+          if (step.maneuver.location && currentRouteGeoJSON.value) {
+            // У ORS way_points - это массив [индекс_начала, индекс_конца]. Нам нужен индекс начала маневра.
+            const maneuverCoordIndex = step.maneuver.location[0];
+            const coords = currentRouteGeoJSON.value.geometry.coordinates[maneuverCoordIndex];
+
+            if (coords) {
+              // Вычисляем реальную дистанцию от пользователя до точки маневра
+              const distToManeuver = calculateDistance({ lat, lon }, { lat: coords[1], lon: coords[0] });
+              stepDistanceRemaining.value = distToManeuver;
+
+              // Если мы приблизились к точке маневра менее чем на 25 метров — переключаем на следующий шаг
+              if (distToManeuver < 25) {
+                currentStepIndex.value++;
+              }
+            }
+          }
+
+          // Плавное уменьшение общей дистанции до финиша (добавь это сразу после блока маневра)
+          if (hasMoved && previousUserLocation.value) {
+            const distDelta = calculateDistance(previousUserLocation.value, { lat, lon });
+            if (navRemainingDistance.value > 0) {
+              navRemainingDistance.value = Math.max(0, navRemainingDistance.value - distDelta);
+            }
           }
         }
       }
