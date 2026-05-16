@@ -208,14 +208,15 @@ const updateCameraToUser = (animate = true) => {
   };
   
   if (animate) {
-    // Используем easeTo с линейной анимацией для плавного и непрерывного ведения по маршруту
-    map.value.easeTo({ ...options, duration: 1000, easing: (t) => t });
+    // 800ms линейно - идеально синхронизируется со стандартной частотой обновления GPS
+    // Создает ощущение непрерывного "скольжения", а не рывков
+    map.value.easeTo({ ...options, duration: 800, easing: (t) => t });
   } else {
     map.value.jumpTo(options);
   }
 };
 
-// Обновленная функция: теперь обновляет компас даже если мы стоим на месте (для вращения карты)
+// Разделение чувствительности: позиция обновляется чаще (1м), а вращение реже (3м)
 const setUserLocation = (lat: number, lon: number, headingFromGps: number | null): boolean => {
   const nextLocation = { lat, lon };
   const prev = userLocation.value;
@@ -233,7 +234,7 @@ const setUserLocation = (lat: number, lon: number, headingFromGps: number | null
   const dist = calculateDistance(prev, nextLocation);
   let headingChanged = false;
 
-  // ОБНОВЛЕНИЕ 1: Компас. Даже если мы стоим на месте (в пределах 2.5м), но повернули устройство
+  // Компас. Отрабатывает даже если стоим на месте.
   if (headingFromGps !== null && headingFromGps !== undefined && !isNaN(headingFromGps)) {
     // Игнорируем микро-колебания компаса (меньше 5 градусов)
     if (Math.abs(userHeading.value - headingFromGps) > 5) {
@@ -242,10 +243,11 @@ const setUserLocation = (lat: number, lon: number, headingFromGps: number | null
     }
   }
 
-  // ОБНОВЛЕНИЕ 2: Координаты. Меняем только если реально прошли больше 2.5 метров
-  if (dist > 2.5) {
-    // Если компаса нет, вычисляем азимут по движению
-    if (headingFromGps === null || isNaN(headingFromGps)) {
+  // Обновляем КООРДИНАТЫ только если сдвинулись на 1.0 метр (повышена отзывчивость!)
+  if (dist > 1.0) {
+    // Обновляем НАПРАВЛЕНИЕ (если нет компаса) только если сдвинулись на 3.0 метра!
+    // Это предотвращает дикое вращение карты при погрешностях GPS стоя на светофоре
+    if ((headingFromGps === null || isNaN(headingFromGps)) && dist > 3.0) {
       userHeading.value = calculateBearing(prev, nextLocation);
     }
     
@@ -253,12 +255,12 @@ const setUserLocation = (lat: number, lon: number, headingFromGps: number | null
     userLocation.value = nextLocation;
     updateUserMarker();
     if (isTrackingUser.value) updateCameraToUser(true);
-    return true; // Произошел реальный сдвиг позиции
+    return true; 
   } else if (headingChanged) {
-    // Позиция не изменилась, но изменилось направление (компас)
+    // Позиция не изменилась, но повернули телефон в руке
     updateUserMarker();
-    if (isTrackingUser.value) updateCameraToUser(true); // Вращаем камеру
-    return false; // Сдвига не было, маршрут пересчитывать не надо
+    if (isTrackingUser.value) updateCameraToUser(true); 
+    return false;
   }
   
   return false;
@@ -575,7 +577,13 @@ const createUserMarkerElement = () => {
     img.style.width = '48px'; img.style.height = '48px'; img.style.objectFit = 'contain'; img.style.filter = 'drop-shadow(0 4px 6px rgba(0, 0, 0, 0.4))';
     el.appendChild(img);
   } else {
-    el.innerHTML = `<svg width="36" height="36" viewBox="0 0 32 32" xmlns="http://www.w3.org/2000/svg"><path d="M16 2L30 30L16 22L2 30L16 2Z" fill="#3880ff" stroke="white" stroke-width="2" stroke-linejoin="round"/></svg>`;
+    // Внедряем анимированное кольцо радар-пульса
+    el.innerHTML = `
+      <div class="pulse-ring"></div>
+      <svg width="36" height="36" viewBox="0 0 32 32" xmlns="http://www.w3.org/2000/svg" style="position: relative; z-index: 2;">
+        <path d="M16 2L30 30L16 22L2 30L16 2Z" fill="#3880ff" stroke="white" stroke-width="2" stroke-linejoin="round"/>
+      </svg>
+    `;
     el.style.display = 'flex'; el.style.alignItems = 'center'; el.style.justifyContent = 'center'; el.style.filter = 'drop-shadow(0 4px 6px rgba(0, 0, 0, 0.4))';
   }
   return el;
@@ -778,6 +786,23 @@ onIonViewDidEnter(async () => {
 :deep(.route-marker) { width: 30px; height: 30px; border-radius: 50%; color: white; display: flex; align-items: center; justify-content: center; font-weight: bold; box-shadow: 0 4px 8px rgba(0, 0, 0, 0.4); border: 2px solid white; }
 :deep(.route-marker.a) { background-color: #3880ff; }
 :deep(.route-marker.b) { background-color: #eb445a; }
-/* Улучшена плавность движения маркера (ease-out делает остановку более естественной) */
-:deep(.user-marker) { pointer-events: none; transition: transform 0.3s ease-out; }
+
+/* Glide-эффект: 0.8 секунд для идеальной синхронизации с GPS и плавности! */
+:deep(.user-marker) { pointer-events: none; transition: transform 0.8s linear; }
+
+/* Анимация пульса под маркером локации для "живого" эффекта */
+:deep(.pulse-ring) {
+  position: absolute;
+  width: 36px;
+  height: 36px;
+  background-color: rgba(56, 128, 255, 0.4);
+  border-radius: 50%;
+  z-index: 1;
+  animation: pulsate 2s ease-out infinite;
+}
+
+@keyframes pulsate {
+  0% { transform: scale(0.8); opacity: 1; }
+  100% { transform: scale(2.5); opacity: 0; }
+}
 </style>
