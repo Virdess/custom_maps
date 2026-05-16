@@ -67,7 +67,7 @@
 </template>
 
 <script setup lang="ts">
-import { IonPage, IonHeader, IonToolbar, IonTitle, IonContent, IonText, IonFab, IonFabButton, IonIcon, onIonViewDidEnter } from '@ionic/vue';
+import { IonPage, IonHeader, IonToolbar, IonTitle, IonContent, IonText, IonFab, IonFabButton, IonIcon, onIonViewDidEnter, onIonViewDidLeave } from '@ionic/vue';
 import { locateOutline, navigate } from 'ionicons/icons';
 import { ref, shallowRef, watch } from 'vue';
 import maplibregl from 'maplibre-gl';
@@ -536,6 +536,15 @@ const locateUser = async (isInitial = false) => {
   } catch (e: any) { alert('Не удалось получить геоданные.'); }
 };
 
+// --- ВАЖНО: ОСТАНАВЛИВАЕМ ОТСЛЕЖИВАНИЕ, ЕСЛИ УШЛИ С КАРТЫ ---
+onIonViewDidLeave(() => {
+  if (positionWatchId.value) {
+    Geolocation.clearWatch({ id: positionWatchId.value });
+    positionWatchId.value = null;
+  }
+  isTrackingUser.value = false;
+});
+
 const updateRouteMode = (mode: string | number | undefined) => {
   if (!mode) return;
   const modeValue = String(mode);
@@ -764,6 +773,11 @@ onIonViewDidEnter(async () => {
       });
       if (globalIs3D.value) { rawMap.touchPitch?.enable(); rawMap.easeTo({ pitch: 45 }); } 
       else { rawMap.touchPitch?.disable(); rawMap.easeTo({ pitch: 0 }); }
+      
+      // Включаем геолокацию заново, если вернулись на вкладку
+      if (!positionWatchId.value) {
+        locateUser(false);
+      }
     }
   }
 });
