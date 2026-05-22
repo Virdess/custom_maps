@@ -47,5 +47,16 @@
 	</array>
 	<key>UIViewControllerBasedStatusBarAppearance</key>
 	<true/>
+
+	<key>NSLocationWhenInUseUsageDescription</key>
+    <string>Нам нужен доступ к вашей геопозиции для отображения вас на карте и работы навигатора.</string>
+
+    <!-- Разрешение на использование геопозиции в фоне (важно для навигатора) -->
+    <key>NSLocationAlwaysAndWhenInUseUsageDescription</key>
+    <string>Навигатор будет отслеживать ваше местоположение в фоновом режиме, чтобы вести по маршруту.</string>
+
+    <!-- Устаревший ключ, но до сих пор необходим для совместимости с некоторыми версиями iOS -->
+    <key>NSLocationAlwaysUsageDescription</key>
+    <string>Навигатор будет отслеживать ваше местоположение в фоновом режиме, чтобы вести по маршруту.</string>
 </dict>
 </plist>
