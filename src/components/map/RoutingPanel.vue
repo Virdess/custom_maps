@@ -37,7 +37,7 @@
       
       <!-- Результаты поиска -->
       <div class="search-results" v-if="results.length > 0">
-        <div class="search-item" v-for="res in results" :key="res.place_id" @click="onSelectResult(res)">
+        <div class="search-item" v-for="(res, index) in results" :key="res.place_id || index" @click="onSelectResult(res)">
           <span class="search-item-title">{{ res.display_name }}</span>
           <span class="search-item-dist" v-if="res.distanceStr">{{ res.distanceStr }}</span>
         </div>
@@ -97,11 +97,14 @@ const onSearch = (evt: any, field: 'A' | 'B') => {
   activeField.value = field;
   const q = evt.target.value;
   clearTimeout(timer);
-  if (q.length < 3) { results.value = []; return; }
+  
+  if (q.length < 3) { 
+    results.value = []; 
+    return; 
+  }
   
   timer = setTimeout(async () => {
     try {
-      // Испольузем Photon: он понимает опечатки (fuzzy) и учитывает близость (lat/lon)
       let url = `https://photon.komoot.io/api/?q=${encodeURIComponent(q)}&limit=10`;
       
       // Добавляем приоритет (bias) по текущей локации пользователя
@@ -110,20 +113,29 @@ const onSearch = (evt: any, field: 'A' | 'B') => {
       }
       
       const res = await fetch(url);
+      if (!res.ok) throw new Error('Network response was not ok');
       const data = await res.json();
       
       if (data && data.features && data.features.length > 0) {
-        let mapped = data.features.map((f: any) => {
-          const props = f.properties;
+        let mapped = data.features.map((f: any, index: number) => {
+          // ИСПРАВЛЕНО: Изменил props на featureProps, чтобы не ломать компилятор Vue
+          const featureProps = f.properties; 
           const coords = f.geometry.coordinates; // [lon, lat]
           
           // Собираем читаемое имя
-          const name = [props.name, props.street, props.housenumber].filter(Boolean).join(', ');
-          const city = props.city || props.town || props.village || props.state || '';
-          const display_name = name ? `${name} (${city})` : city;
+          const nameParts = [featureProps.name, featureProps.street, featureProps.housenumber].filter(Boolean);
+          const name = nameParts.length > 0 ? nameParts.join(', ') : '';
+          const city = featureProps.city || featureProps.town || featureProps.village || featureProps.state || '';
+          
+          let display_name = name;
+          if (city && name && !name.includes(city)) {
+            display_name += ` (${city})`;
+          } else if (!name) {
+            display_name = city;
+          }
 
           return {
-            place_id: props.osm_id,
+            place_id: featureProps.osm_id || index, // Страховка, если osm_id пустой
             display_name: display_name || 'Неизвестное место',
             lat: coords[1],
             lon: coords[0],
@@ -133,7 +145,7 @@ const onSearch = (evt: any, field: 'A' | 'B') => {
           };
         });
         
-        // Оставляем твою логику расчета дистанции и сортировки
+        // Расчет дистанции и сортировка
         if (props.userLocation) {
           mapped.forEach((a: any) => {
             const dist = calculateDistance(props.userLocation!.lat, props.userLocation!.lon, a.lat, a.lon);
@@ -147,8 +159,11 @@ const onSearch = (evt: any, field: 'A' | 'B') => {
       } else {
         results.value = [];
       }
-    } catch (e) { results.value = []; }
-  }, 400); // Немного уменьшили debounce для отзывчивости
+    } catch (e) { 
+      console.error("Ошибка поиска адреса:", e);
+      results.value = []; 
+    }
+  }, 400); 
 };
 
 // Функция расчета дистанции по формуле гаверсинуса (в метрах)
@@ -163,11 +178,12 @@ const calculateDistance = (lat1: number, lon1: number, lat2: number, lon2: numbe
 };
 
 const onSelectResult = (item: any) => {
-  const shortName = item.display_name.split(',')[0] + (item.display_name.split(',')[1] ? ',' + item.display_name.split(',')[1] : '');
+  // ИСПРАВЛЕНО: Убрал хрупкий split(','), который мог выдавать undefined.
+  // Теперь берется полное красивое название.
   if (activeField.value === 'A') {
-    emit('update:routeTextA', shortName);
+    emit('update:routeTextA', item.display_name);
   } else {
-    emit('update:routeTextB', shortName);
+    emit('update:routeTextB', item.display_name);
   }
   emit('pointSelected', activeField.value, item.lat, item.lon);
   results.value = [];
