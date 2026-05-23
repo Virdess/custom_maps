@@ -12,54 +12,52 @@
         Пресеты меняют цвета, толщину линий, стиль иконок и перспективу. Добавлены эффекты свечения и контуров!
       </p>
 
-      <ion-card class="preset-card gta-sa" @click="applyPreset('gtasa')">
-        <ion-card-header>
-          <ion-card-title>GTA San Andreas</ion-card-title>
-        </ion-card-header>
-        <ion-card-content>
-          <p><strong>Вид: 2D (строго сверху)</strong></p>
-          Классический радар. Белые дороги с черной обводкой (Outline), серые плоские здания, зеленые парки.
-        </ion-card-content>
-      </ion-card>
+      <PresetCard 
+        title="GTA San Andreas" 
+        viewType="2D (строго сверху)" 
+        themeClass="gta-sa" 
+        @select="applyPreset('gtasa')"
+      >
+        Классический радар. Белые дороги с черной обводкой (Outline), серые плоские здания, зеленые парки.
+      </PresetCard>
 
-      <ion-card class="preset-card gta-v" @click="applyPreset('gtav')">
-        <ion-card-header>
-          <ion-card-title>GTA V (Los Santos)</ion-card-title>
-        </ion-card-header>
-        <ion-card-content>
-          <p><strong>Вид: 3D</strong></p>
-          Темная карта с полупрозрачными высотками. Гладкие магистрали и маршрут с легкой неоновой подсветкой.
-        </ion-card-content>
-      </ion-card>
+      <PresetCard 
+        title="GTA V (Los Santos)" 
+        viewType="3D" 
+        themeClass="gta-v" 
+        @select="applyPreset('gtav')"
+      >
+        Темная карта с полупрозрачными высотками. Гладкие магистрали и маршрут с легкой неоновой подсветкой.
+      </PresetCard>
 
-      <ion-card class="preset-card cyberpunk" @click="applyPreset('cyberpunk')">
-        <ion-card-header>
-          <ion-card-title>Cyberpunk 2077</ion-card-title>
-        </ion-card-header>
-        <ion-card-content>
-          <p><strong>Вид: 3D + Neon Glow</strong></p>
-          Неоновый город. Фиолетовые магистрали со свечением, темно-синие здания, желтый GPS маршрут.
-        </ion-card-content>
-      </ion-card>
+      <PresetCard 
+        title="Cyberpunk 2077" 
+        viewType="3D + Neon Glow" 
+        themeClass="cyberpunk" 
+        @select="applyPreset('cyberpunk')"
+      >
+        Неоновый город. Фиолетовые магистрали со свечением, темно-синие здания, желтый GPS маршрут.
+      </PresetCard>
 
-      <ion-card class="preset-card minecraft" @click="applyPreset('minecraft')">
-        <ion-card-header>
-          <ion-card-title>Minecraft</ion-card-title>
-        </ion-card-header>
-        <ion-card-content>
-          <p><strong>Вид: 2D + Pixelated Rendering</strong></p>
-          Блочный стиль с отключенным сглаживанием Canvas. Толстые дороги, коричневые здания, жесткие квадратные иконки.
-        </ion-card-content>
-      </ion-card>
+      <PresetCard 
+        title="Minecraft" 
+        viewType="2D + Pixelated Rendering" 
+        themeClass="minecraft" 
+        @select="applyPreset('minecraft')"
+      >
+        Блочный стиль с отключенным сглаживанием Canvas. Толстые дороги, коричневые здания, жесткие квадратные иконки.
+      </PresetCard>
 
     </ion-content>
   </ion-page>
 </template>
 
 <script setup lang="ts">
-import { IonPage, IonHeader, IonToolbar, IonTitle, IonContent, IonCard, IonCardHeader, IonCardTitle, IonCardContent } from '@ionic/vue';
+import { IonPage, IonHeader, IonToolbar, IonTitle, IonContent } from '@ionic/vue';
 import { Preferences } from '@capacitor/preferences';
+import PresetCard from '@/components/presets/PresetCard.vue';
 
+// Словарь пресетов (оставлен оригинальным)
 const presets: Record<string, any> = {
   gtasa: {
     is3D: false, pixelated: false, map_background: '#b4c9cc',
@@ -75,12 +73,10 @@ const presets: Record<string, any> = {
     highway_pedestrian: { color: '#b0b0b0', size: 15, opacity: 80, outline: { enable: true, color: '#000000', width: 5 } },
     highway_bridge: { color: '#a0a0a0', size: 50, opacity: 0, outline: { enable: true, color: '#000000', width: 15 } },
     route_line: { color: '#991111', size: 60, opacity: 100, outline: { enable: true, color: '#000000', width: 25 } },
-
     hospital: { color: '#ff3333', size: 35, opacity: 100, bg: false },
     restaurant: { color: '#ffcc00', size: 35, opacity: 100, bg: false },
     supermarket: { color: '#33cc33', size: 35, opacity: 100, bg: false }
   },
-
   gtav: {
     is3D: true, pixelated: false, map_background: '#14181f',
     water: { color: '#102238', size: 40, opacity: 100, bg: true },
@@ -97,74 +93,23 @@ const presets: Record<string, any> = {
     route_line: { color: '#b624ff', size: 50, opacity: 100, glow: { enable: true, color: '#b624ff', blur: 30, opacity: 50 } },
     hospital: { color: '#ffffff', size: 30, opacity: 90, bg: false }
   },
-
   cyberpunk: {
-    is3D: true,
-    pixelated: false,
-    map_background: '#0d0d26', // Тёмно-фиолетовый фон карты
-
-    water: { color: '#0c285f', size: 40, opacity: 85, bg: true }, // Темно-синяя вода
-    landuse_green: { color: '#113723', size: 40, opacity: 90, bg: true }, // Приглушенный зелёный
-    park: { color: '#07451a', size: 40, opacity: 95, bg: true }, // Очень тёмный парк
-
-    // Здания с неоновой подсветкой
-    building: {
-      color: '#931010', size: 40, opacity: 70, bg: true,
-      glow: { enable: true, color: '#931010', blur: 15, opacity: 30 }
-    },
-
-    // Основные магистрали - фиолетовые с неоном
-    highway_motorway: {
-      color: '#4dbbff', size: 55, opacity: 30,
-      glow: { enable: true, color: '#4dbbff', blur: 15, opacity: 25 },
-      outline: { enable: true, color: '#4dbbff', width: 3 }
-    },
-
-    highway_primary: {
-      color: '#4dbbff', size: 45, opacity: 40,
-      glow: { enable: true, color: '#4dbbff', blur: 15, opacity: 25 },
-      outline: { enable: true, color: '#4dbbff', width: 3 }
-    },
-
-    highway_secondary: {
-      color: '#4dbbff', size: 35, opacity: 40,
-      glow: { enable: true, color: '#4dbbff', blur: 15, opacity: 25 }
-    },
-
-    highway_residential: {
-      color: '#4dbbff', size: 25, opacity: 40,
-      glow: { enable: true, color: '#4dbbff', blur: 15, opacity: 25 }
-    },
-
+    is3D: true, pixelated: false, map_background: '#0d0d26',
+    water: { color: '#0c285f', size: 40, opacity: 85, bg: true },
+    landuse_green: { color: '#113723', size: 40, opacity: 90, bg: true },
+    park: { color: '#07451a', size: 40, opacity: 95, bg: true },
+    building: { color: '#931010', size: 40, opacity: 70, bg: true, glow: { enable: true, color: '#931010', blur: 15, opacity: 30 } },
+    highway_motorway: { color: '#4dbbff', size: 55, opacity: 30, glow: { enable: true, color: '#4dbbff', blur: 15, opacity: 25 }, outline: { enable: true, color: '#4dbbff', width: 3 } },
+    highway_primary: { color: '#4dbbff', size: 45, opacity: 40, glow: { enable: true, color: '#4dbbff', blur: 15, opacity: 25 }, outline: { enable: true, color: '#4dbbff', width: 3 } },
+    highway_secondary: { color: '#4dbbff', size: 35, opacity: 40, glow: { enable: true, color: '#4dbbff', blur: 15, opacity: 25 } },
+    highway_residential: { color: '#4dbbff', size: 25, opacity: 40, glow: { enable: true, color: '#4dbbff', blur: 15, opacity: 25 } },
     highway_unclassified: { color: '#4dbbff', size: 18, opacity: 70, lineStyle: 'solid' },
     highway_pedestrian: { color: '#4dbbff', size: 12, opacity: 60, lineStyle: 'dotted' },
-
-    highway_bridge: {
-      color: '#4dbbff', size: 48, opacity: 0,
-      glow: { enable: true, color: '#4dbbff', blur: 15, opacity: 0 },
-      outline: { enable: true, color: '#4dbbff', width: 0 }
-    },
-
-    // Маршрут - ярко-жёлтый/золотой с сильным свечением
-    route_line: {
-      color: '#FFD700', size: 28, opacity: 100,
-      glow: { enable: true, color: '#FFD700', blur: 45, opacity: 90 },
-      outline: { enable: true, color: '#8B6914', width: 5 }
-    },
-
-    // POI в стиле Cyberpunk
-    hospital: {
-      color: '#FF2B6D', size: 45, opacity: 100, bg: false,
-      glow: { enable: true, color: '#FF2B6D', blur: 20, opacity: 60 }
-    },
-    restaurant: {
-      color: '#FFD700', size: 42, opacity: 100, bg: false,
-      glow: { enable: true, color: '#FFD700', blur: 15, opacity: 50 }
-    },
-    supermarket: {
-      color: '#00E5FF', size: 42, opacity: 100, bg: false,
-      glow: { enable: true, color: '#00E5FF', blur: 15, opacity: 50 }
-    },
+    highway_bridge: { color: '#4dbbff', size: 48, opacity: 0, glow: { enable: true, color: '#4dbbff', blur: 15, opacity: 0 }, outline: { enable: true, color: '#4dbbff', width: 0 } },
+    route_line: { color: '#FFD700', size: 28, opacity: 100, glow: { enable: true, color: '#FFD700', blur: 45, opacity: 90 }, outline: { enable: true, color: '#8B6914', width: 5 } },
+    hospital: { color: '#FF2B6D', size: 45, opacity: 100, bg: false, glow: { enable: true, color: '#FF2B6D', blur: 20, opacity: 60 } },
+    restaurant: { color: '#FFD700', size: 42, opacity: 100, bg: false, glow: { enable: true, color: '#FFD700', blur: 15, opacity: 50 } },
+    supermarket: { color: '#00E5FF', size: 42, opacity: 100, bg: false, glow: { enable: true, color: '#00E5FF', blur: 15, opacity: 50 } },
     pharmacy: { color: '#E56DFF', size: 38, opacity: 100, bg: false },
     clothes: { color: '#FF6B35', size: 38, opacity: 100, bg: false },
     cafe: { color: '#FFD700', size: 38, opacity: 100, bg: false },
@@ -177,7 +122,6 @@ const presets: Record<string, any> = {
     bus_stop: { color: '#00E5FF', size: 32, opacity: 90, bg: false },
     other: { color: '#B86BFF', size: 35, opacity: 85, bg: false }
   },
-
   minecraft: {
     is3D: false, pixelated: true, map_background: '#79c05a',
     water: { color: '#3f76e4', size: 40, opacity: 100, bg: true },
@@ -237,7 +181,7 @@ const applyPreset = async (presetName: string) => {
     }
   }
 
-  const defaultFill = {
+  const defaultFill: any = {
     gtasa: { color: '#33cc33', size: 35, opacity: 100, bg: false },
     gtav: { color: '#ffffff', size: 30, opacity: 90, bg: false },
     cyberpunk: { color: '#00e5ff', size: 40, opacity: 80, bg: false },
@@ -258,48 +202,3 @@ const applyPreset = async (presetName: string) => {
   location.reload();
 };
 </script>
-
-<style scoped>
-.preset-card {
-  cursor: pointer;
-  transition: transform 0.2s, box-shadow 0.2s;
-  margin-bottom: 20px;
-}
-
-.preset-card:active {
-  transform: scale(0.95);
-}
-
-.preset-card p {
-  margin-top: 0;
-}
-
-.gta-sa {
-  border-left: 5px solid #a3b7b9;
-  background: linear-gradient(90deg, rgba(180, 201, 204, 0.3) 0%, var(--ion-background-color, #ffffff) 100%);
-}
-
-.gta-v {
-  border-left: 5px solid #b624ff;
-  background: linear-gradient(90deg, rgba(20, 24, 31, 0.5) 0%, var(--ion-background-color, #ffffff) 100%);
-}
-
-.cyberpunk {
-  border-left: 5px solid #ffd700;
-  background: linear-gradient(135deg, rgba(13, 13, 18, 0.95) 0%, var(--ion-background-color, #ffffff) 100%);
-  color: var(--ion-text-color, #ffffff);
-  box-shadow: 0 0 20px rgba(155, 77, 255, 0.3);
-}
-
-.cyberpunk ion-card-title,
-.cyberpunk ion-card-content,
-.cyberpunk p {
-  color: #00e5ff;
-  text-shadow: 0 0 5px rgba(0, 229, 255, 0.5);
-}
-
-.minecraft {
-  border-left: 5px solid #59a03f;
-  background: linear-gradient(90deg, rgba(121, 192, 90, 0.4) 0%, var(--ion-background-color, #ffffff) 100%);
-}
-</style>
