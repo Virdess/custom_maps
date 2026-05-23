@@ -22,5 +22,16 @@ export function useGlobalSettings() {
     await Preferences.set({ key: 'global_pixelated', value: val.toString() });
   };
 
-  return { is3D, isPixelated, loadSettings, update3D, updatePixelated };
+  const emergencyClear = async () => {
+    if (confirm('Вы уверены? Это удалит все пользовательские стили и иконки. Приложение будет сброшено до заводских настроек.')) {
+      // ИСПРАВЛЕНИЕ 2: Сначала жестко дожидаемся удаления
+      await Preferences.clear();
+      
+      // На мобильных устройствах Capacitor window.location.reload() может не убивать память Vue.
+      // Лучше использовать перенаправление в корень приложения (хард рестарт)
+      window.location.href = '/';
+    }
+  };
+
+  return { is3D, isPixelated, loadSettings, update3D, updatePixelated, emergencyClear };
 }

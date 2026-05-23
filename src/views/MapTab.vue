@@ -15,10 +15,10 @@
           v-model:routeTextB="routeTextB"
           :routeMode="routeMode" 
           :hasRoutes="!!(routeA || routeB)" 
-          :hasUserLocation="!!userLocation"
+          :hasUserLocation="!!rawLocation"
           :hasCustomIcon="!!userIconPath" 
           :currentCity="currentCity" 
-          :userLocation="userLocation"
+          :userLocation="rawLocation"
           @updateRouteMode="updateRouteMode" 
           @clearRoute="clearRoute" 
           @changeUserIcon="onUserIconChange"
@@ -89,11 +89,10 @@
 import { ref, shallowRef, watch, computed } from 'vue';
 import { IonPage, IonHeader, IonToolbar, IonTitle, IonContent, IonText, IonFab, IonFabButton, IonIcon, IonButton, onIonViewDidEnter, onIonViewDidLeave } from '@ionic/vue';
 import { locateOutline, navigate } from 'ionicons/icons';
-import { Geolocation } from '@capacitor/geolocation';
 import { App } from '@capacitor/app';
+import { Geolocation } from '@capacitor/geolocation';
 import maplibregl from 'maplibre-gl';
 import 'maplibre-gl/dist/maplibre-gl.css';
-import * as turf from '@turf/turf';
 
 // --- Компоненты ---
 import RoutingPanel from '@/components/map/RoutingPanel.vue';
@@ -103,15 +102,14 @@ import NavHeader from '@/components/map/NavHeader.vue';
 import NavFooter from '@/components/map/NavFooter.vue';
 
 // --- Утилиты и Хуки ---
-import { calculateDistance, calculateBearing, getShortestHeading } from '@/utils/geoMath';
+import { calculateDistance } from '@/utils/geoMath';
 import { useMapStyle } from '@/composables/useMapStyle';
 import { useMapPreferences, categories } from '@/composables/useMapPreferences';
+import { useGeolocation } from '@/composables/useGeolocation';
 
-let lastRerouteTime = 0;
-const REROUTE_THRESHOLD_METERS = 40; 
 interface POI { id: string; lat: number; lon: number; name: string; categoryId: string; subCategory?: string; }
 
-// --- Инициализация хранилища и стилей ---
+// --- Хранилище, стили и локация ---
 const {
   globalIs3D, globalPixelated, loadedIcons, loadedCategoryColors, loadedCategorySizes,
   loadedCategoryOpacities, loadedCategoryBgStates, loadedCategoryLineStyles,
@@ -124,6 +122,10 @@ const { generateMapStyle } = useMapStyle({
   sizes: loadedCategorySizes, lineStyles: loadedCategoryLineStyles, outEnabled, outColor, outWidth,
   glEnabled, glColor, glBlur, glOpacity
 });
+
+const { 
+  rawLocation, displayLocation, userHeading, currentSpeed, startTracking, stopTracking 
+} = useGeolocation();
 
 // --- Состояние карты ---
 const map = shallowRef<maplibregl.Map | null>(null);
@@ -143,26 +145,22 @@ const currentCity = ref<string | null>(null);
 const routeMarkerA = shallowRef<maplibregl.Marker | null>(null);
 const routeMarkerB = shallowRef<maplibregl.Marker | null>(null);
 
-// --- Состояние пользователя и навигатора ---
+// --- Навигатор ---
 const isTrackingUser = ref(true);
 const isNavigating = ref(false);
 const routeSteps = ref<any[]>([]);
 const currentStepIndex = ref(0);
-const currentSpeed = ref(0);
 const navRemainingDistance = ref(0);
 const navRemainingTime = ref(0);
 const stepDistanceRemaining = ref(0); 
+let lastRerouteTime = 0;
 
 const currentStep = computed(() => routeSteps.value.length > currentStepIndex.value ? routeSteps.value[currentStepIndex.value] : null);
-
-const userLocation = ref<{ lat: number, lon: number } | null>(null);
-const previousUserLocation = ref<{ lat: number, lon: number } | null>(null);
 const userLocationMarker = shallowRef<maplibregl.Marker | null>(null);
-const userHeading = ref<number>(0);
-const positionWatchId = ref<string | null>(null);
+const previousRenderLocation = ref<{ lat: number, lon: number } | null>(null);
 
 // ==========================================
-// ЛОГИКА НАВИГАЦИИ, КАМЕРЫ И МАРКЕРА
+// ЛОГИКА КАМЕРЫ И МАРКЕРА
 // ==========================================
 
 const startNavigation = () => {
@@ -179,14 +177,32 @@ const stopNavigation = () => {
 };
 
 const updateCameraToUser = (animate = true) => {
-  if (!map.value || !userLocation.value || !isTrackingUser.value) return;
+  const loc = displayLocation.value;
+  if (!map.value || !loc || !isTrackingUser.value) return;
+  
+  // Умная камера: отдаляемся на скорости
+  let targetZoom = 18.5;
+  let targetPitch = globalIs3D.value ? 60 : 0;
+
+  if (isNavigating.value) {
+    if (currentSpeed.value > 60) {
+      targetZoom = 15.5; // Трасса
+      targetPitch = globalIs3D.value ? 65 : 0;
+    } else if (currentSpeed.value > 30) {
+      targetZoom = 17.0; // Город
+    }
+  } else {
+    targetZoom = 16.5; // Свободный режим
+  }
+
   const options = {
-    center: [userLocation.value.lon, userLocation.value.lat] as [number, number],
+    center: [loc.lon, loc.lat] as [number, number],
     bearing: userHeading.value,
-    zoom: isNavigating.value ? 18.5 : 17.5,
-    pitch: globalIs3D.value && isNavigating.value ? 65 : (globalIs3D.value ? 60 : 0)
+    zoom: targetZoom,
+    pitch: targetPitch
   };
-  if (animate) map.value.easeTo({ ...options, duration: 800, easing: (t) => t });
+  
+  if (animate) map.value.easeTo({ ...options, duration: 1000, easing: (t) => t });
   else map.value.jumpTo(options);
 };
 
@@ -196,6 +212,8 @@ const animateMarker = (startLoc: { lat: number, lon: number }, endLoc: { lat: nu
   const animate = (currentTime: number) => {
     const elapsed = currentTime - startTime;
     const progress = Math.min(elapsed / duration, 1);
+    
+    // Линейная интерполяция
     const currentLat = startLoc.lat + (endLoc.lat - startLoc.lat) * progress;
     const currentLon = startLoc.lon + (endLoc.lon - startLoc.lon) * progress;
     const currentH = startH + (endH - startH) * progress;
@@ -204,130 +222,64 @@ const animateMarker = (startLoc: { lat: number, lon: number }, endLoc: { lat: nu
       userLocationMarker.value.setLngLat([currentLon, currentLat]);
       userLocationMarker.value.setRotation(currentH);
     }
+    
     if (progress < 1) markerAnimationId = requestAnimationFrame(animate);
   };
   if (markerAnimationId) cancelAnimationFrame(markerAnimationId);
   markerAnimationId = requestAnimationFrame(animate);
 };
 
-const setUserLocation = (lat: number, lon: number, headingFromGps: number | null): boolean => {
-  const nextLocation = { lat, lon };
-  const prev = userLocation.value;
+// ==========================================
+// ГЕОЛОКАЦИЯ И REROUTING
+// ==========================================
 
-  if (!prev) {
-    userLocation.value = nextLocation;
-    previousUserLocation.value = nextLocation;
-    if (headingFromGps !== null && !isNaN(headingFromGps)) userHeading.value = headingFromGps;
-    updateUserMarker(); 
+const handleLocationUpdate = () => {
+  if (!displayLocation.value) return;
+  
+  const currentLoc = displayLocation.value;
+  const prevLoc = previousRenderLocation.value;
+
+  if (!prevLoc) {
+    updateUserMarker();
     if (isTrackingUser.value) updateCameraToUser(false);
-    return true;
-  }
-
-  const dist = calculateDistance(prev, nextLocation);
-  let headingChanged = false;
-  let newHeading = userHeading.value;
-
-  if (headingFromGps !== null && headingFromGps !== undefined && !isNaN(headingFromGps)) {
-    newHeading = getShortestHeading(userHeading.value, headingFromGps);
-    if (Math.abs(userHeading.value - newHeading) > 2) headingChanged = true;
-  }
-
-  if (dist > 1.0) {
-    if ((headingFromGps === null || isNaN(headingFromGps)) && dist > 3.0) {
-      const calculatedBearing = calculateBearing(prev, nextLocation);
-      newHeading = getShortestHeading(userHeading.value, calculatedBearing);
-    }
-    animateMarker(prev, nextLocation, userHeading.value, newHeading, 800);
-    previousUserLocation.value = prev;
-    userLocation.value = nextLocation;
-    userHeading.value = newHeading;
+  } else {
+    animateMarker(prevLoc, currentLoc, userLocationMarker.value?.getRotation() || userHeading.value, userHeading.value, 1000);
     if (isTrackingUser.value) updateCameraToUser(true);
-    return true; 
-  } else if (headingChanged) {
-    animateMarker(prev, prev, userHeading.value, newHeading, 800);
-    userHeading.value = newHeading;
-    if (isTrackingUser.value) updateCameraToUser(true); 
-    return false;
   }
-  return false;
+
+  previousRenderLocation.value = currentLoc;
+
+  if (isNavigating.value && rawLocation.value && routeSteps.value.length > currentStepIndex.value) {
+    const step = routeSteps.value[currentStepIndex.value];
+    if (step.maneuver.location && currentRouteGeoJSON.value) {
+      const maneuverCoordIndex = step.maneuver.location[0]; 
+      const coords = currentRouteGeoJSON.value.geometry.coordinates[maneuverCoordIndex];
+      
+      if (coords && coords.length === 2) {
+        const distToManeuver = calculateDistance(rawLocation.value, { lat: coords[1], lon: coords[0] });
+        stepDistanceRemaining.value = distToManeuver;
+        if (distToManeuver < 25) currentStepIndex.value++;
+      }
+    }
+
+    if (prevLoc) {
+      const distDelta = calculateDistance(prevLoc, currentLoc);
+      if (navRemainingDistance.value > 0) {
+        navRemainingDistance.value = Math.max(0, navRemainingDistance.value - distDelta);
+      }
+    }
+  }
 };
 
-// ==========================================
-// ГЕОЛОКАЦИЯ И МАРШРУТЫ
-// ==========================================
-
-const locateUser = async (isInitial = false) => {
-  try {
-    const permissions = await Geolocation.checkPermissions();
-    if (permissions.location !== 'granted') {
-      const request = await Geolocation.requestPermissions();
-      if (request.location !== 'granted') { alert('Предоставьте доступ к геолокации.'); return; }
-    }
-
-    const pos = await Geolocation.getCurrentPosition({ enableHighAccuracy: true, timeout: 10000 });
-    setUserLocation(pos.coords.latitude, pos.coords.longitude, pos.coords.heading ?? null);
-    await setCurrentCity(pos.coords.latitude, pos.coords.longitude);
-    
+const triggerReroute = () => {
+  const now = Date.now();
+  if (now - lastRerouteTime > 10000 && rawLocation.value) {
+    console.log("Отклонение от маршрута. Перестраиваем...");
+    lastRerouteTime = now;
+    routeA.value = { ...rawLocation.value };
     updateRouteMarkers();
-    if (isInitial && map.value) updateCameraToUser(false);
-
-    if (positionWatchId.value) Geolocation.clearWatch({ id: positionWatchId.value });
-
-    positionWatchId.value = await Geolocation.watchPosition({ enableHighAccuracy: true, timeout: 15000, maximumAge: 3000 }, (pos, err) => {
-      if (err) {
-        console.warn('GPS Error:', err);
-        if (positionWatchId.value) { Geolocation.clearWatch({ id: positionWatchId.value }); positionWatchId.value = null; }
-        if (isTrackingUser.value || isNavigating.value) setTimeout(() => locateUser(false), 3000);
-        return;
-      }
-      if (!pos || pos.coords.accuracy > 100) return;
-
-      const lat = pos.coords.latitude;
-      const lon = pos.coords.longitude;
-      const hasMoved = setUserLocation(lat, lon, pos.coords.heading ?? null);
-
-      if (isNavigating.value) {
-        currentSpeed.value = Math.round((pos.coords.speed || 0) * 3.6);
-
-        if (currentRouteGeoJSON.value) {
-          const userPoint = turf.point([lon, lat]);
-          const routeLine = turf.lineString(currentRouteGeoJSON.value.geometry.coordinates);
-          const distanceToRoute = turf.pointToLineDistance(userPoint, routeLine, { units: 'meters' });
-
-          if (distanceToRoute > REROUTE_THRESHOLD_METERS) {
-            const now = Date.now();
-            if (now - lastRerouteTime > 10000) {
-              lastRerouteTime = now;
-              routeA.value = { lat, lon };
-              updateRouteMarkers();
-              calculateRoute(false);
-            }
-          }
-        }
-
-        if (routeSteps.value.length > currentStepIndex.value) {
-          const step = routeSteps.value[currentStepIndex.value];
-          if (step.maneuver.location && currentRouteGeoJSON.value) {
-            const maneuverCoordIndex = step.maneuver.location[0]; 
-            const coords = currentRouteGeoJSON.value.geometry.coordinates[maneuverCoordIndex];
-            
-            if (coords && coords.length === 2) {
-              const distToManeuver = calculateDistance({ lat, lon }, { lat: coords[1], lon: coords[0] });
-              stepDistanceRemaining.value = distToManeuver;
-              if (distToManeuver < 25) currentStepIndex.value++;
-            }
-          }
-        }
-
-        if (hasMoved && previousUserLocation.value) {
-          const distDelta = calculateDistance(previousUserLocation.value, { lat, lon });
-          if (navRemainingDistance.value > 0) {
-            navRemainingDistance.value = Math.max(0, navRemainingDistance.value - distDelta);
-          }
-        }
-      }
-    });
-  } catch (e: any) { alert('Не удалось получить геоданные.'); }
+    calculateRoute(false);
+  }
 };
 
 const calculateRoute = async (fitBounds = true) => {
@@ -336,10 +288,7 @@ const calculateRoute = async (fitBounds = true) => {
 
   try {
     const modeMap: Record<string, string> = {
-      car: 'driving-car',
-      bus: 'driving-hgv', 
-      bicycle: 'cycling-regular',
-      walk: 'foot-walking'
+      car: 'driving-car', bus: 'driving-hgv', bicycle: 'cycling-regular', walk: 'foot-walking'
     };
     const profile = modeMap[routeMode.value] || 'driving-car';
     const apiKey = import.meta.env.VITE_ORS_API_KEY; 
@@ -378,14 +327,6 @@ const calculateRoute = async (fitBounds = true) => {
       }
     }
   } catch (e) { console.error("Ошибка маршрута", e); }
-};
-
-const setCurrentCity = async (lat: number, lon: number) => {
-  try {
-    const res = await fetch(`https://nominatim.openstreetmap.org/reverse?format=json&lat=${lat}&lon=${lon}&addressdetails=1`);
-    const data = await res.json();
-    currentCity.value = data?.address?.city || data?.address?.town || data?.address?.village || data?.address?.municipality || data?.address?.county || null;
-  } catch (e) { currentCity.value = null; }
 };
 
 // ==========================================
@@ -428,6 +369,14 @@ const onPoiIconRemove = async (poiId: string) => {
   }
 };
 
+const setCurrentCity = async (lat: number, lon: number) => {
+  try {
+    const res = await fetch(`https://nominatim.openstreetmap.org/reverse?format=json&lat=${lat}&lon=${lon}&addressdetails=1`);
+    const data = await res.json();
+    currentCity.value = data?.address?.city || data?.address?.town || data?.address?.village || data?.address?.municipality || data?.address?.county || null;
+  } catch (e) { currentCity.value = null; }
+};
+
 // ==========================================
 // ЖИЗНЕННЫЙ ЦИКЛ КАРТЫ
 // ==========================================
@@ -437,7 +386,7 @@ onIonViewDidEnter(async () => {
 
   App.addListener('appStateChange', async ({ isActive }) => {
     if (isActive && (isTrackingUser.value || isNavigating.value)) {
-      await locateUser(false);
+      startTracking(currentRouteGeoJSON.value, isNavigating.value, triggerReroute, handleLocationUpdate);
     }
   });
 
@@ -458,7 +407,15 @@ onIonViewDidEnter(async () => {
       isLoading.value = false;
       setTimeout(() => rawMap.resize(), 200);
       await initMapLibreImages(rawMap);
-      await locateUser(true);
+      
+      // ИСПРАВЛЕНИЕ: Пингуем сенсор GPS перед включением постоянного трекинга.
+      try {
+        await Geolocation.getCurrentPosition({ enableHighAccuracy: true, timeout: 5000 });
+      } catch (e) {
+        console.warn("Первичный GPS запрос отклонен", e);
+      }
+      
+      startTracking(currentRouteGeoJSON.value, isNavigating.value, triggerReroute, handleLocationUpdate);
       
       const poiLayerIds = categories.filter(c => !c.isArea && !c.isLine && !c.isSpecial).map(c => `poi_${c.id}`);
       rawMap.on('click', poiLayerIds, (e: any) => {
@@ -474,16 +431,13 @@ onIonViewDidEnter(async () => {
       setTimeout(() => map.value!.resize(), 200);
       await initMapLibreImages(map.value);
       map.value.setStyle(generateMapStyle());
-      if (!positionWatchId.value) locateUser(false);
+      startTracking(currentRouteGeoJSON.value, isNavigating.value, triggerReroute, handleLocationUpdate);
     }
   }
 });
 
 onIonViewDidLeave(() => {
-  if (positionWatchId.value) {
-    Geolocation.clearWatch({ id: positionWatchId.value });
-    positionWatchId.value = null;
-  }
+  stopTracking();
   isTrackingUser.value = false;
   isNavigating.value = false;
 });
@@ -493,12 +447,9 @@ const onPointSelected = async (field: 'A' | 'B', lat: number, lon: number) => {
     routeA.value = { lat, lon };
   } else {
     routeB.value = { lat, lon };
-    if (!routeA.value) {
-      if (!userLocation.value) await locateUser(false);
-      if (userLocation.value) {
-        routeA.value = { lat: userLocation.value.lat, lon: userLocation.value.lon };
-        routeTextA.value = 'Моё местоположение';
-      }
+    if (!routeA.value && rawLocation.value) {
+      routeA.value = { ...rawLocation.value };
+      routeTextA.value = 'Моё местоположение';
     }
   }
   updateRouteMarkers();
@@ -511,18 +462,30 @@ const routeTo = async (lat: number, lon: number, name: string) => {
   isPoiModalOpen.value = false;
   routeB.value = { lat, lon };
   routeTextB.value = name;
-  if (!routeA.value) {
-    if (!userLocation.value) { await locateUser(false); }
-    if (userLocation.value) {
-      routeA.value = { lat: userLocation.value.lat, lon: userLocation.value.lon };
-      routeTextA.value = 'Моё местоположение';
-    }
+  if (!routeA.value && rawLocation.value) {
+    routeA.value = { ...rawLocation.value };
+    routeTextA.value = 'Моё местоположение';
   }
   updateRouteMarkers();
   calculateRoute();
 };
 
-const panToUser = () => { isTrackingUser.value = true; if (userLocation.value && map.value) updateCameraToUser(true); else locateUser(true); };
+const panToUser = async () => { 
+  isTrackingUser.value = true; 
+  
+  // ИСПРАВЛЕНИЕ: Принудительный опрос GPS, если watcher завис
+  try {
+    const pos = await Geolocation.getCurrentPosition({ enableHighAccuracy: true, timeout: 5000 });
+    if (pos && map.value) {
+       map.value.easeTo({ center: [pos.coords.longitude, pos.coords.latitude], zoom: 17.5 });
+    }
+  } catch (e) {
+    console.warn("GPS timeout", e);
+  }
+  
+  if (displayLocation.value && map.value) updateCameraToUser(true); 
+};
+
 const swapRoutes = () => { const temp = routeA.value; routeA.value = routeB.value; routeB.value = temp; updateRouteMarkers(); if (routeA.value && routeB.value) calculateRoute(); };
 const clearRoute = () => { routeA.value = null; routeB.value = null; routeTextA.value = ''; routeTextB.value = ''; routeInfo.value = null; currentRouteGeoJSON.value = null; isNavigating.value = false; if (map.value?.getSource('route')) (map.value.getSource('route') as any).setData({ type: 'FeatureCollection', features: [] }); updateRouteMarkers(); };
 const updateRouteMode = (mode: string | number | undefined) => { if (!mode) return; const modeValue = String(mode); if (!['car', 'bus', 'bicycle', 'walk'].includes(modeValue)) return; routeMode.value = modeValue as 'car' | 'bus' | 'bicycle' | 'walk'; if (routeA.value && routeB.value) calculateRoute(false); };
@@ -538,14 +501,16 @@ const createUserMarkerElement = () => {
   }
   return el;
 };
+
 const updateUserMarker = () => {
-  if (!map.value || !userLocation.value) return;
+  if (!map.value || !displayLocation.value) return;
   if (userLocationMarker.value) {
-    userLocationMarker.value.setLngLat([userLocation.value.lon, userLocation.value.lat]); userLocationMarker.value.setRotation(userHeading.value);
+    userLocationMarker.value.setLngLat([displayLocation.value.lon, displayLocation.value.lat]); userLocationMarker.value.setRotation(userHeading.value);
   } else {
-    userLocationMarker.value = new maplibregl.Marker({ element: createUserMarkerElement(), rotationAlignment: 'map', pitchAlignment: 'map', rotation: userHeading.value }).setLngLat([userLocation.value.lon, userLocation.value.lat]).addTo(map.value);
+    userLocationMarker.value = new maplibregl.Marker({ element: createUserMarkerElement(), rotationAlignment: 'map', pitchAlignment: 'map', rotation: userHeading.value }).setLngLat([displayLocation.value.lon, displayLocation.value.lat]).addTo(map.value);
   }
 };
+
 const updateRouteMarkers = () => {
   if (!map.value) return;
   if (routeMarkerA.value) routeMarkerA.value.remove(); if (routeMarkerB.value) routeMarkerB.value.remove();
@@ -555,37 +520,19 @@ const updateRouteMarkers = () => {
 </script>
 
 <style scoped>
+/* Стили из MapTab.vue остаются абсолютно такими же */
 .map-wrapper { position: relative; width: 100%; height: 100%; display: flex; flex-direction: column; }
 .map-container { flex: 1; width: 100%; z-index: 1; background-color: var(--ion-background-color, #e8e6e1); }
-
-.pixelated-map :deep(canvas) {
-  image-rendering: pixelated !important;
-  image-rendering: crisp-edges !important;
-}
-
-.floating-status {
-  position: absolute; bottom: 130px; left: 50%; transform: translateX(-50%);
-  background: var(--ion-item-background, rgba(255, 255, 255, 0.92)); color: var(--ion-text-color, #000000);
-  padding: 6px 12px; border-radius: 20px; box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2); z-index: 1000; pointer-events: none;
-}
-
+.pixelated-map :deep(canvas) { image-rendering: pixelated !important; image-rendering: crisp-edges !important; }
+.floating-status { position: absolute; bottom: 130px; left: 50%; transform: translateX(-50%); background: var(--ion-item-background, rgba(255, 255, 255, 0.92)); color: var(--ion-text-color, #000000); padding: 6px 12px; border-radius: 20px; box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2); z-index: 1000; pointer-events: none; }
 .location-fab { margin-bottom: 80px; transition: all 0.3s ease; z-index: 10; }
 .nav-fab-adjusted { margin-bottom: 180px; }
-
-.start-nav-panel {
-  position: absolute; bottom: 110px; left: 50%; transform: translateX(-50%); width: 90%; max-width: 400px; z-index: 1000;
-}
+.start-nav-panel { position: absolute; bottom: 110px; left: 50%; transform: translateX(-50%); width: 90%; max-width: 400px; z-index: 1000; }
 .start-nav-btn { font-weight: bold; font-size: 18px; --box-shadow: 0 4px 12px rgba(45, 211, 111, 0.4); }
-
 :deep(.route-marker) { width: 30px; height: 30px; border-radius: 50%; color: white; display: flex; align-items: center; justify-content: center; font-weight: bold; box-shadow: 0 4px 8px rgba(0, 0, 0, 0.4); border: 2px solid white; }
 :deep(.route-marker.a) { background-color: #3880ff; }
 :deep(.route-marker.b) { background-color: #eb445a; }
-
 :deep(.user-marker) { pointer-events: none; }
-
-:deep(.pulse-ring) {
-  position: absolute; width: 36px; height: 36px; background-color: rgba(56, 128, 255, 0.4); border-radius: 50%; z-index: 1; animation: pulsate 2s ease-out infinite;
-}
-
+:deep(.pulse-ring) { position: absolute; width: 36px; height: 36px; background-color: rgba(56, 128, 255, 0.4); border-radius: 50%; z-index: 1; animation: pulsate 2s ease-out infinite; }
 @keyframes pulsate { 0% { transform: scale(0.8); opacity: 1; } 100% { transform: scale(2.5); opacity: 0; } }
 </style>
