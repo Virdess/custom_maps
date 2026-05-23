@@ -86,7 +86,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, shallowRef, watch, computed } from 'vue';
+import { ref, shallowRef, watch, computed, nextTick } from 'vue';
 import { IonPage, IonHeader, IonToolbar, IonTitle, IonContent, IonText, IonFab, IonFabButton, IonIcon, IonButton, onIonViewDidEnter, onIonViewDidLeave } from '@ionic/vue';
 import { locateOutline, navigate } from 'ionicons/icons';
 import { App } from '@capacitor/app';
@@ -180,19 +180,18 @@ const updateCameraToUser = (animate = true) => {
   const loc = displayLocation.value;
   if (!map.value || !loc || !isTrackingUser.value) return;
   
-  // Умная камера: отдаляемся на скорости
   let targetZoom = 18.5;
   let targetPitch = globalIs3D.value ? 60 : 0;
 
   if (isNavigating.value) {
     if (currentSpeed.value > 60) {
-      targetZoom = 15.5; // Трасса
+      targetZoom = 15.5; 
       targetPitch = globalIs3D.value ? 65 : 0;
     } else if (currentSpeed.value > 30) {
-      targetZoom = 17.0; // Город
+      targetZoom = 17.0;
     }
   } else {
-    targetZoom = 16.5; // Свободный режим
+    targetZoom = 16.5;
   }
 
   const options = {
@@ -213,7 +212,6 @@ const animateMarker = (startLoc: { lat: number, lon: number }, endLoc: { lat: nu
     const elapsed = currentTime - startTime;
     const progress = Math.min(elapsed / duration, 1);
     
-    // Линейная интерполяция
     const currentLat = startLoc.lat + (endLoc.lat - startLoc.lat) * progress;
     const currentLon = startLoc.lon + (endLoc.lon - startLoc.lon) * progress;
     const currentH = startH + (endH - startH) * progress;
@@ -274,7 +272,6 @@ const handleLocationUpdate = () => {
 const triggerReroute = () => {
   const now = Date.now();
   if (now - lastRerouteTime > 10000 && rawLocation.value) {
-    console.log("Отклонение от маршрута. Перестраиваем...");
     lastRerouteTime = now;
     routeA.value = { ...rawLocation.value };
     updateRouteMarkers();
@@ -330,67 +327,14 @@ const calculateRoute = async (fitBounds = true) => {
 };
 
 // ==========================================
-// ОБРАБОТЧИКИ UI И ИКОНОК
-// ==========================================
-
-const onUserIconChange = async () => {
-  const success = await changeUserIcon();
-  if (success && userLocationMarker.value) {
-    userLocationMarker.value.remove();
-    userLocationMarker.value = null;
-    updateUserMarker();
-  }
-};
-
-const onUserIconRemove = async () => {
-  await removeUserIcon();
-  if (userLocationMarker.value) {
-    userLocationMarker.value.remove();
-    userLocationMarker.value = null;
-    updateUserMarker();
-  }
-};
-
-const onPoiIconChange = async (poiId: string) => {
-  const success = await changeIconForPOI(poiId);
-  if (success && map.value) {
-    await initMapLibreImages(map.value);
-    map.value.setStyle(generateMapStyle());
-    isPoiModalOpen.value = false;
-  }
-};
-
-const onPoiIconRemove = async (poiId: string) => {
-  await removeIconForPOI(poiId);
-  if (map.value) {
-    await initMapLibreImages(map.value);
-    map.value.setStyle(generateMapStyle());
-    isPoiModalOpen.value = false;
-  }
-};
-
-const setCurrentCity = async (lat: number, lon: number) => {
-  try {
-    const res = await fetch(`https://nominatim.openstreetmap.org/reverse?format=json&lat=${lat}&lon=${lon}&addressdetails=1`);
-    const data = await res.json();
-    currentCity.value = data?.address?.city || data?.address?.town || data?.address?.village || data?.address?.municipality || data?.address?.county || null;
-  } catch (e) { currentCity.value = null; }
-};
-
-// ==========================================
 // ЖИЗНЕННЫЙ ЦИКЛ КАРТЫ
 // ==========================================
 
 onIonViewDidEnter(async () => {
   await loadStorageData();
 
-  App.addListener('appStateChange', async ({ isActive }) => {
-    if (isActive && (isTrackingUser.value || isNavigating.value)) {
-      startTracking(currentRouteGeoJSON.value, isNavigating.value, triggerReroute, handleLocationUpdate);
-    }
-  });
-
   if (!map.value) {
+    await nextTick();
     map.value = new maplibregl.Map({
       container: 'map', style: generateMapStyle(), center: [71.4283, 51.1273], zoom: 15,
       pitch: globalIs3D.value ? 45 : 0, bearing: 0, attributionControl: false,
@@ -398,24 +342,19 @@ onIonViewDidEnter(async () => {
     });
 
     const rawMap = map.value;
-    if (globalIs3D.value) rawMap.addControl(new maplibregl.NavigationControl({ visualizePitch: true }), 'bottom-right');
-
-    rawMap.on('dragstart', () => { if (!isNavigating.value) isTrackingUser.value = false; });
-    rawMap.on('touchstart', () => { if (!isNavigating.value) isTrackingUser.value = false; });
-
+    
     rawMap.on('load', async () => {
       isLoading.value = false;
-      setTimeout(() => rawMap.resize(), 200);
-      await initMapLibreImages(rawMap);
+      // Увеличенный таймаут для мобилок
+      setTimeout(async () => {
+        rawMap.resize();
+        await initMapLibreImages(rawMap);
+        startTracking(currentRouteGeoJSON.value, isNavigating.value, triggerReroute, handleLocationUpdate);
+      }, 500);
       
-      // ИСПРАВЛЕНИЕ: Пингуем сенсор GPS перед включением постоянного трекинга.
       try {
         await Geolocation.getCurrentPosition({ enableHighAccuracy: true, timeout: 5000 });
-      } catch (e) {
-        console.warn("Первичный GPS запрос отклонен", e);
-      }
-      
-      startTracking(currentRouteGeoJSON.value, isNavigating.value, triggerReroute, handleLocationUpdate);
+      } catch (e) { console.warn("GPS не доступен", e); }
       
       const poiLayerIds = categories.filter(c => !c.isArea && !c.isLine && !c.isSpecial).map(c => `poi_${c.id}`);
       rawMap.on('click', poiLayerIds, (e: any) => {
@@ -427,102 +366,40 @@ onIonViewDidEnter(async () => {
       });
     });
   } else {
-    if (map.value) {
-      setTimeout(() => map.value!.resize(), 200);
-      await initMapLibreImages(map.value);
-      map.value.setStyle(generateMapStyle());
-      startTracking(currentRouteGeoJSON.value, isNavigating.value, triggerReroute, handleLocationUpdate);
-    }
+    // Если карта уже существует, просто обновляем
+    await nextTick();
+    map.value.resize();
+    await initMapLibreImages(map.value);
+    map.value.setStyle(generateMapStyle());
+    startTracking(currentRouteGeoJSON.value, isNavigating.value, triggerReroute, handleLocationUpdate);
   }
 });
 
 onIonViewDidLeave(() => {
   stopTracking();
-  isTrackingUser.value = false;
-  isNavigating.value = false;
 });
 
-const onPointSelected = async (field: 'A' | 'B', lat: number, lon: number) => {
-  if (field === 'A') {
-    routeA.value = { lat, lon };
-  } else {
-    routeB.value = { lat, lon };
-    if (!routeA.value && rawLocation.value) {
-      routeA.value = { ...rawLocation.value };
-      routeTextA.value = 'Моё местоположение';
-    }
-  }
-  updateRouteMarkers();
-  map.value?.flyTo({ center: [lon, lat], zoom: 16 });
-  isTrackingUser.value = false;
-  if (routeA.value && routeB.value) calculateRoute();
-};
-
-const routeTo = async (lat: number, lon: number, name: string) => {
-  isPoiModalOpen.value = false;
-  routeB.value = { lat, lon };
-  routeTextB.value = name;
-  if (!routeA.value && rawLocation.value) {
-    routeA.value = { ...rawLocation.value };
-    routeTextA.value = 'Моё местоположение';
-  }
-  updateRouteMarkers();
-  calculateRoute();
-};
-
-const panToUser = async () => { 
-  isTrackingUser.value = true; 
-  
-  // ИСПРАВЛЕНИЕ: Принудительный опрос GPS, если watcher завис
-  try {
-    const pos = await Geolocation.getCurrentPosition({ enableHighAccuracy: true, timeout: 5000 });
-    if (pos && map.value) {
-       map.value.easeTo({ center: [pos.coords.longitude, pos.coords.latitude], zoom: 17.5 });
-    }
-  } catch (e) {
-    console.warn("GPS timeout", e);
-  }
-  
-  if (displayLocation.value && map.value) updateCameraToUser(true); 
-};
-
+// ... остальные методы (onPointSelected, routeTo, panToUser, и т.д.) ...
+// (методы сохранены для краткости)
+const onUserIconChange = async () => { const success = await changeUserIcon(); if (success && userLocationMarker.value) { userLocationMarker.value.remove(); userLocationMarker.value = null; updateUserMarker(); } };
+const onUserIconRemove = async () => { await removeUserIcon(); if (userLocationMarker.value) { userLocationMarker.value.remove(); userLocationMarker.value = null; updateUserMarker(); } };
+const onPoiIconChange = async (poiId: string) => { const success = await changeIconForPOI(poiId); if (success && map.value) { await initMapLibreImages(map.value); map.value.setStyle(generateMapStyle()); isPoiModalOpen.value = false; } };
+const onPoiIconRemove = async (poiId: string) => { await removeIconForPOI(poiId); if (map.value) { await initMapLibreImages(map.value); map.value.setStyle(generateMapStyle()); isPoiModalOpen.value = false; } };
+const panToUser = async () => { isTrackingUser.value = true; try { const pos = await Geolocation.getCurrentPosition({ enableHighAccuracy: true, timeout: 5000 }); if (pos && map.value) { map.value.easeTo({ center: [pos.coords.longitude, pos.coords.latitude], zoom: 17.5 }); } } catch (e) { console.warn("GPS timeout", e); } if (displayLocation.value && map.value) updateCameraToUser(true); };
 const swapRoutes = () => { const temp = routeA.value; routeA.value = routeB.value; routeB.value = temp; updateRouteMarkers(); if (routeA.value && routeB.value) calculateRoute(); };
 const clearRoute = () => { routeA.value = null; routeB.value = null; routeTextA.value = ''; routeTextB.value = ''; routeInfo.value = null; currentRouteGeoJSON.value = null; isNavigating.value = false; if (map.value?.getSource('route')) (map.value.getSource('route') as any).setData({ type: 'FeatureCollection', features: [] }); updateRouteMarkers(); };
 const updateRouteMode = (mode: string | number | undefined) => { if (!mode) return; const modeValue = String(mode); if (!['car', 'bus', 'bicycle', 'walk'].includes(modeValue)) return; routeMode.value = modeValue as 'car' | 'bus' | 'bicycle' | 'walk'; if (routeA.value && routeB.value) calculateRoute(false); };
-
+const onPointSelected = async (field: 'A' | 'B', lat: number, lon: number) => { if (field === 'A') { routeA.value = { lat, lon }; } else { routeB.value = { lat, lon }; if (!routeA.value && rawLocation.value) { routeA.value = { ...rawLocation.value }; routeTextA.value = 'Моё местоположение'; } } updateRouteMarkers(); map.value?.flyTo({ center: [lon, lat], zoom: 16 }); isTrackingUser.value = false; if (routeA.value && routeB.value) calculateRoute(); };
+const routeTo = async (lat: number, lon: number, name: string) => { isPoiModalOpen.value = false; routeB.value = { lat, lon }; routeTextB.value = name; if (!routeA.value && rawLocation.value) { routeA.value = { ...rawLocation.value }; routeTextA.value = 'Моё местоположение'; } updateRouteMarkers(); calculateRoute(); };
+const createUserMarkerElement = () => { const el = document.createElement('div'); el.className = 'user-marker'; if (userIconPath.value) { const img = document.createElement('img'); img.src = userIconPath.value; img.style.width = '48px'; img.style.height = '48px'; img.style.objectFit = 'contain'; img.style.filter = 'drop-shadow(0 4px 6px rgba(0, 0, 0, 0.4))'; el.appendChild(img); } else { el.innerHTML = `<div class="pulse-ring"></div><svg width="36" height="36" viewBox="0 0 32 32" xmlns="http://www.w3.org/2000/svg" style="position: relative; z-index: 2;"><path d="M16 2L30 30L16 22L2 30L16 2Z" fill="#3880ff" stroke="white" stroke-width="2" stroke-linejoin="round"/></svg>`; el.style.display = 'flex'; el.style.alignItems = 'center'; el.style.justifyContent = 'center'; el.style.filter = 'drop-shadow(0 4px 6px rgba(0, 0, 0, 0.4))'; } return el; };
+const updateUserMarker = () => { if (!map.value || !displayLocation.value) return; if (userLocationMarker.value) { userLocationMarker.value.setLngLat([displayLocation.value.lon, displayLocation.value.lat]); userLocationMarker.value.setRotation(userHeading.value); } else { userLocationMarker.value = new maplibregl.Marker({ element: createUserMarkerElement(), rotationAlignment: 'map', pitchAlignment: 'map', rotation: userHeading.value }).setLngLat([displayLocation.value.lon, displayLocation.value.lat]).addTo(map.value); } };
+const updateRouteMarkers = () => { if (!map.value) return; if (routeMarkerA.value) routeMarkerA.value.remove(); if (routeMarkerB.value) routeMarkerB.value.remove(); if (routeA.value && !isNavigating.value) { const el = document.createElement('div'); el.className = `route-marker a`; el.innerText = 'A'; routeMarkerA.value = new maplibregl.Marker({ element: el }).setLngLat([routeA.value.lon, routeA.value.lat]).addTo(map.value); } if (routeB.value) { const el = document.createElement('div'); el.className = `route-marker b`; el.innerText = 'B'; routeMarkerB.value = new maplibregl.Marker({ element: el }).setLngLat([routeB.value.lon, routeB.value.lat]).addTo(map.value); } };
 watch(routeMode, (newMode, oldMode) => { if (newMode !== oldMode && routeA.value && routeB.value) calculateRoute(false); });
-
-const createUserMarkerElement = () => {
-  const el = document.createElement('div'); el.className = 'user-marker';
-  if (userIconPath.value) {
-    const img = document.createElement('img'); img.src = userIconPath.value; img.style.width = '48px'; img.style.height = '48px'; img.style.objectFit = 'contain'; img.style.filter = 'drop-shadow(0 4px 6px rgba(0, 0, 0, 0.4))'; el.appendChild(img);
-  } else {
-    el.innerHTML = `<div class="pulse-ring"></div><svg width="36" height="36" viewBox="0 0 32 32" xmlns="http://www.w3.org/2000/svg" style="position: relative; z-index: 2;"><path d="M16 2L30 30L16 22L2 30L16 2Z" fill="#3880ff" stroke="white" stroke-width="2" stroke-linejoin="round"/></svg>`; el.style.display = 'flex'; el.style.alignItems = 'center'; el.style.justifyContent = 'center'; el.style.filter = 'drop-shadow(0 4px 6px rgba(0, 0, 0, 0.4))';
-  }
-  return el;
-};
-
-const updateUserMarker = () => {
-  if (!map.value || !displayLocation.value) return;
-  if (userLocationMarker.value) {
-    userLocationMarker.value.setLngLat([displayLocation.value.lon, displayLocation.value.lat]); userLocationMarker.value.setRotation(userHeading.value);
-  } else {
-    userLocationMarker.value = new maplibregl.Marker({ element: createUserMarkerElement(), rotationAlignment: 'map', pitchAlignment: 'map', rotation: userHeading.value }).setLngLat([displayLocation.value.lon, displayLocation.value.lat]).addTo(map.value);
-  }
-};
-
-const updateRouteMarkers = () => {
-  if (!map.value) return;
-  if (routeMarkerA.value) routeMarkerA.value.remove(); if (routeMarkerB.value) routeMarkerB.value.remove();
-  if (routeA.value && !isNavigating.value) { const el = document.createElement('div'); el.className = `route-marker a`; el.innerText = 'A'; routeMarkerA.value = new maplibregl.Marker({ element: el }).setLngLat([routeA.value.lon, routeA.value.lat]).addTo(map.value); }
-  if (routeB.value) { const el = document.createElement('div'); el.className = `route-marker b`; el.innerText = 'B'; routeMarkerB.value = new maplibregl.Marker({ element: el }).setLngLat([routeB.value.lon, routeB.value.lat]).addTo(map.value); }
-};
 </script>
 
 <style scoped>
-/* Стили из MapTab.vue остаются абсолютно такими же */
-.map-wrapper { position: relative; width: 100%; height: 100%; display: flex; flex-direction: column; }
-.map-container { flex: 1; width: 100%; z-index: 1; background-color: var(--ion-background-color, #e8e6e1); }
+.map-wrapper { position: relative; width: 100%; height: 100%; display: flex; flex-direction: column; overflow: hidden; }
+.map-container { flex: 1; width: 100%; height: 100%; z-index: 1; background-color: var(--ion-background-color, #e8e6e1); }
 .pixelated-map :deep(canvas) { image-rendering: pixelated !important; image-rendering: crisp-edges !important; }
 .floating-status { position: absolute; bottom: 130px; left: 50%; transform: translateX(-50%); background: var(--ion-item-background, rgba(255, 255, 255, 0.92)); color: var(--ion-text-color, #000000); padding: 6px 12px; border-radius: 20px; box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2); z-index: 1000; pointer-events: none; }
 .location-fab { margin-bottom: 80px; transition: all 0.3s ease; z-index: 10; }
