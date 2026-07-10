@@ -66,7 +66,7 @@ export function useMapStyle(config: StyleConfig) {
 
     const normalLineCats = config.categories.filter((c) => c.isLine && c.id !== 'route_line');
     const routeLineCat = config.categories.find((c) => c.id === 'route_line');
-    const lineCats = routeLineCat ? [...normalLineCats, routeLineCat] : normalLineCats;
+    const lineCats = normalLineCats;
 
     // 1. Отрисовка обводок (Outline)
     lineCats.forEach((cat) => {
@@ -112,6 +112,32 @@ export function useMapStyle(config: StyleConfig) {
       });
     } else {
       style.layers.push({ id: "building-flat", type: "fill", source: "openfreemap", "source-layer": "building", paint: { "fill-color": getCol('building'), "fill-opacity": getOp('building') } });
+    }
+
+    // 4.5. Линия маршрута — поверх дорог и зданий, чтобы её не перекрывали другие слои
+    if (routeLineCat) {
+      const cat = routeLineCat;
+      const baseW = getBaseLineWidth(cat.id);
+      const dash = getLineDash(cat.id);
+
+      if (config.outEnabled.value[cat.id]) {
+        const extW = (config.outWidth.value[cat.id] || 10) / 10;
+        const paint: any = { "line-color": config.outColor.value[cat.id] || '#000000', "line-width": baseW + extW * 2, "line-opacity": getOp(cat.id) };
+        if (dash) paint["line-dasharray"] = dash;
+        style.layers.push({ id: `road_${cat.id}_outline`, type: "line", source: "route", paint, layout: { "line-join": "round", "line-cap": "round" } });
+      }
+
+      const basePaint: any = { "line-color": getCol(cat.id), "line-width": baseW, "line-opacity": getOp(cat.id) };
+      if (dash) basePaint["line-dasharray"] = dash;
+      style.layers.push({ id: `road_${cat.id}_base`, type: "line", source: "route", paint: basePaint, layout: { "line-join": "round", "line-cap": "round" } });
+
+      if (config.glEnabled.value[cat.id]) {
+        const blur = (config.glBlur.value[cat.id] || 20) / 10;
+        const op = (config.glOpacity.value[cat.id] ?? 80) / 100;
+        const paint: any = { "line-color": config.glColor.value[cat.id] || '#ffffff', "line-width": baseW + blur, "line-blur": blur, "line-opacity": op };
+        if (dash) paint["line-dasharray"] = dash;
+        style.layers.push({ id: `road_${cat.id}_glow`, type: "line", source: "route", paint, layout: { "line-join": "round", "line-cap": "round" } });
+      }
     }
 
     // 5. Текст и номера домов

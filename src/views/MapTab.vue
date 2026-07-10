@@ -34,7 +34,8 @@
         />
 
         <div class="floating-status" v-if="!isNavigating">
-          <ion-text color="primary" v-if="isLoading"><small>Инициализация карты...</small></ion-text>
+          <ion-text color="danger" v-if="routeError"><small>{{ routeError }}</small></ion-text>
+          <ion-text color="primary" v-else-if="isLoading"><small>Инициализация карты...</small></ion-text>
           <ion-text color="success" v-else><small>Векторные данные загружены</small></ion-text>
         </div>
 
@@ -87,10 +88,10 @@
 
 <script setup lang="ts">
 import { ref, shallowRef, watch, computed, nextTick } from 'vue';
-import { IonPage, IonHeader, IonToolbar, IonTitle, IonContent, IonText, IonFab, IonFabButton, IonIcon, IonButton, onIonViewDidEnter, onIonViewDidLeave } from '@ionic/vue';
+import { IonPage, IonHeader, IonToolbar, IonTitle, IonContent, IonText, IonFab, IonFabButton, IonIcon, IonButton, onIonViewDidEnter, onIonViewDidLeave, toastController } from '@ionic/vue';
 import { locateOutline, navigate } from 'ionicons/icons';
-import { App } from '@capacitor/app';
 import { Geolocation } from '@capacitor/geolocation';
+import * as turf from '@turf/turf';
 import maplibregl from 'maplibre-gl';
 import 'maplibre-gl/dist/maplibre-gl.css';
 
@@ -140,7 +141,13 @@ const routeTextA = ref('');
 const routeTextB = ref('');
 const routeMode = ref<'car' | 'bus' | 'bicycle' | 'walk'>('car');
 const routeInfo = ref<{ duration: string, distance: string } | null>(null);
+const routeError = ref<string | null>(null);
 const currentRouteGeoJSON = ref<any>(null);
+// Общая длина/время маршрута и накопленные дистанции до каждой вершины геометрии —
+// нужны для честного расчёта прогресса по маршруту
+const routeTotalDistance = ref(0);
+const routeTotalDuration = ref(0);
+let routeCumDist: number[] = [];
 const currentCity = ref<string | null>(null);
 const routeMarkerA = shallowRef<maplibregl.Marker | null>(null);
 const routeMarkerB = shallowRef<maplibregl.Marker | null>(null);
@@ -247,26 +254,40 @@ const handleLocationUpdate = () => {
 
   previousRenderLocation.value = currentLoc;
 
-  if (isNavigating.value && rawLocation.value && routeSteps.value.length > currentStepIndex.value) {
-    const step = routeSteps.value[currentStepIndex.value];
-    if (step.maneuver.location && currentRouteGeoJSON.value) {
-      const maneuverCoordIndex = step.maneuver.location[0]; 
-      const coords = currentRouteGeoJSON.value.geometry.coordinates[maneuverCoordIndex];
-      
-      if (coords && coords.length === 2) {
-        const distToManeuver = calculateDistance(rawLocation.value, { lat: coords[1], lon: coords[0] });
-        stepDistanceRemaining.value = distToManeuver;
-        if (distToManeuver < 25) currentStepIndex.value++;
-      }
-    }
+  if (isNavigating.value && rawLocation.value && currentRouteGeoJSON.value && routeSteps.value.length > 0) {
+    try {
+      // Прогресс = пройденная дистанция вдоль линии маршрута (а не вычитание дельты,
+      // которое "уменьшало" остаток даже при движении в обратную сторону)
+      const line = turf.lineString(currentRouteGeoJSON.value.geometry.coordinates);
+      const snapped = turf.nearestPointOnLine(line, turf.point([rawLocation.value.lon, rawLocation.value.lat]), { units: 'meters' });
+      const progress = snapped.properties.location ?? 0;
+      const total = routeTotalDistance.value || routeCumDist[routeCumDist.length - 1] || 0;
 
-    if (prevLoc) {
-      const distDelta = calculateDistance(prevLoc, currentLoc);
-      if (navRemainingDistance.value > 0) {
-        navRemainingDistance.value = Math.max(0, navRemainingDistance.value - distDelta);
-      }
-    }
+      navRemainingDistance.value = Math.max(0, total - progress);
+      navRemainingTime.value = total > 0 ? routeTotalDuration.value * (navRemainingDistance.value / total) : 0;
+
+      // Текущая подсказка — ближайший манёвр впереди по маршруту
+      let idx = routeSteps.value.findIndex((s: any) => {
+        const wpIdx = s.maneuver.location?.[0] ?? 0;
+        return (routeCumDist[wpIdx] ?? 0) - progress > 10;
+      });
+      if (idx === -1) idx = routeSteps.value.length - 1;
+      currentStepIndex.value = idx;
+
+      const wpIdx = routeSteps.value[idx].maneuver.location?.[0] ?? 0;
+      stepDistanceRemaining.value = Math.max(0, (routeCumDist[wpIdx] ?? total) - progress);
+
+      if (total > 50 && navRemainingDistance.value < 20) onArrived();
+    } catch (e) { console.warn('Ошибка расчёта прогресса навигации', e); }
   }
+};
+
+const onArrived = async () => {
+  stopNavigation();
+  const toast = await toastController.create({
+    message: 'Вы прибыли в пункт назначения', duration: 3000, position: 'bottom', color: 'success'
+  });
+  await toast.present();
 };
 
 const triggerReroute = () => {
@@ -279,6 +300,14 @@ const triggerReroute = () => {
   }
 };
 
+// Типы манёвров ORS (числовые) -> модификатор для иконки подсказки
+const orsTypeToModifier = (t: number): string => {
+  if ([0, 2, 4, 12].includes(t)) return 'left';
+  if ([1, 3, 5, 13].includes(t)) return 'right';
+  if (t === 9) return 'left'; // разворот
+  return '';
+};
+
 const calculateRoute = async (fitBounds = true) => {
   if (!routeA.value || !routeB.value || !map.value) return;
   const rawMap = map.value;
@@ -288,16 +317,31 @@ const calculateRoute = async (fitBounds = true) => {
       car: 'driving-car', bus: 'driving-hgv', bicycle: 'cycling-regular', walk: 'foot-walking'
     };
     const profile = modeMap[routeMode.value] || 'driving-car';
-    const apiKey = import.meta.env.VITE_ORS_API_KEY; 
+    const apiKey = import.meta.env.VITE_ORS_API_KEY;
+
+    if (!apiKey) {
+      routeError.value = 'Не задан ключ API маршрутов (VITE_ORS_API_KEY)';
+      return;
+    }
 
     const url = `https://api.openrouteservice.org/v2/directions/${profile}?api_key=${apiKey}&start=${routeA.value.lon},${routeA.value.lat}&end=${routeB.value.lon},${routeB.value.lat}&language=ru`;
 
     const res = await fetch(url);
+    if (!res.ok) {
+      const body = await res.text();
+      console.error('Ошибка ORS API', res.status, body);
+      routeError.value = res.status === 401 || res.status === 403
+        ? 'Ключ API маршрутов недействителен или исчерпан лимит'
+        : 'Сервис маршрутов недоступен, попробуйте позже';
+      routeInfo.value = null;
+      return;
+    }
     const data = await res.json();
 
     if (data.features && data.features.length > 0) {
       const feature = data.features[0];
       currentRouteGeoJSON.value = feature;
+      routeError.value = null;
       if (rawMap.getSource('route')) (rawMap.getSource('route') as any).setData(feature.geometry);
 
       const summary = feature.properties.summary;
@@ -306,12 +350,28 @@ const calculateRoute = async (fitBounds = true) => {
         duration: `${Math.round(summary.duration / 60)} мин`
       };
 
+      // Накопленные дистанции вдоль геометрии — для прогресса навигации
+      const coords: number[][] = feature.geometry.coordinates;
+      routeCumDist = [0];
+      for (let i = 1; i < coords.length; i++) {
+        routeCumDist.push(routeCumDist[i - 1] + calculateDistance(
+          { lat: coords[i - 1][1], lon: coords[i - 1][0] },
+          { lat: coords[i][1], lon: coords[i][0] }
+        ));
+      }
+      routeTotalDistance.value = summary.distance;
+      routeTotalDuration.value = summary.duration;
+
       const steps = feature.properties.segments[0].steps;
       if (steps) {
         routeSteps.value = steps.map((step: any) => ({
-          instruction: step.instruction, 
+          instruction: step.instruction,
           distance: step.distance,
-          maneuver: { location: step.way_points, type: step.type } 
+          maneuver: {
+            location: step.way_points,
+            type: step.type === 10 ? 'arrive' : 'turn',
+            modifier: orsTypeToModifier(step.type)
+          }
         }));
         currentStepIndex.value = 0;
         navRemainingDistance.value = summary.distance;
@@ -319,19 +379,53 @@ const calculateRoute = async (fitBounds = true) => {
         stepDistanceRemaining.value = steps[0]?.distance || 0;
       }
 
-      if (fitBounds && !isTrackingUser.value && !isNavigating.value) {
-        rawMap.fitBounds(feature.bbox, { padding: 50 });
+      // Показываем весь маршрут (раньше условие !isTrackingUser почти никогда
+      // не выполнялось, и камера не показывала построенный маршрут)
+      if (fitBounds && !isNavigating.value && feature.bbox) {
+        isTrackingUser.value = false;
+        rawMap.fitBounds(feature.bbox as [number, number, number, number], { padding: 60 });
       }
+    } else {
+      routeError.value = 'Маршрут между точками не найден';
+      routeInfo.value = null;
     }
-  } catch (e) { console.error("Ошибка маршрута", e); }
+  } catch (e) {
+    console.error("Ошибка маршрута", e);
+    routeError.value = 'Не удалось построить маршрут (нет сети?)';
+    routeInfo.value = null;
+  }
 };
 
 // ==========================================
 // ЖИЗНЕННЫЙ ЦИКЛ КАРТЫ
 // ==========================================
 
+// Восстановление данных route-источника (setStyle сбрасывает geojson-источники)
+const restoreRouteOnMap = () => {
+  const src = map.value?.getSource('route') as any;
+  if (src && currentRouteGeoJSON.value) src.setData(currentRouteGeoJSON.value.geometry);
+};
+
+// setStyle стирает добавленные через addImage картинки и данные geojson-источников,
+// поэтому иконки и маршрут нужно восстанавливать ПОСЛЕ применения стиля
+const applyMapStyle = () => {
+  const rawMap = map.value;
+  if (!rawMap) return;
+  rawMap.setStyle(generateMapStyle());
+  rawMap.once('styledata', async () => {
+    await initMapLibreImages(rawMap);
+    restoreRouteOnMap();
+  });
+};
+
+const beginTracking = () => {
+  startTracking(() => currentRouteGeoJSON.value, () => isNavigating.value, triggerReroute, handleLocationUpdate);
+};
+
 onIonViewDidEnter(async () => {
-  await loadStorageData();
+  try {
+    await loadStorageData();
+  } catch (e) { console.warn('Не удалось загрузить настройки, используем значения по умолчанию', e); }
 
   if (!map.value) {
     await nextTick();
@@ -342,23 +436,20 @@ onIonViewDidEnter(async () => {
     });
 
     const rawMap = map.value;
-    
+
     rawMap.on('load', async () => {
       isLoading.value = false;
-      // Увеличенный таймаут для мобилок
-      setTimeout(async () => {
-        rawMap.resize();
-        await initMapLibreImages(rawMap);
-        startTracking(currentRouteGeoJSON.value, isNavigating.value, triggerReroute, handleLocationUpdate);
-      }, 500);
-      
-      try {
-        await Geolocation.getCurrentPosition({ enableHighAccuracy: true, timeout: 5000 });
-      } catch (e) { console.warn("GPS не доступен", e); }
-      
+      await initMapLibreImages(rawMap);
+      restoreRouteOnMap();
+      beginTracking();
+
+      // Повторный resize для мобилок: контейнер может получить финальную высоту с задержкой
+      rawMap.resize();
+      setTimeout(() => rawMap.resize(), 500);
+
       const poiLayerIds = categories.filter(c => !c.isArea && !c.isLine && !c.isSpecial).map(c => `poi_${c.id}`);
       rawMap.on('click', poiLayerIds, (e: any) => {
-        if (!e.features || e.features.length === 0 || isNavigating.value) return; 
+        if (!e.features || e.features.length === 0 || isNavigating.value) return;
         const feature = e.features[0];
         const catId = feature.layer.id.replace('poi_', '');
         selectedPOI.value = { id: catId, lat: e.lngLat.lat, lon: e.lngLat.lng, name: feature.properties.name || feature.properties.class || 'Объект', categoryId: catId, subCategory: feature.properties.subclass };
@@ -369,9 +460,8 @@ onIonViewDidEnter(async () => {
     // Если карта уже существует, просто обновляем
     await nextTick();
     map.value.resize();
-    await initMapLibreImages(map.value);
-    map.value.setStyle(generateMapStyle());
-    startTracking(currentRouteGeoJSON.value, isNavigating.value, triggerReroute, handleLocationUpdate);
+    applyMapStyle();
+    beginTracking();
   }
 });
 
@@ -383,12 +473,14 @@ onIonViewDidLeave(() => {
 // (методы сохранены для краткости)
 const onUserIconChange = async () => { const success = await changeUserIcon(); if (success && userLocationMarker.value) { userLocationMarker.value.remove(); userLocationMarker.value = null; updateUserMarker(); } };
 const onUserIconRemove = async () => { await removeUserIcon(); if (userLocationMarker.value) { userLocationMarker.value.remove(); userLocationMarker.value = null; updateUserMarker(); } };
-const onPoiIconChange = async (poiId: string) => { const success = await changeIconForPOI(poiId); if (success && map.value) { await initMapLibreImages(map.value); map.value.setStyle(generateMapStyle()); isPoiModalOpen.value = false; } };
-const onPoiIconRemove = async (poiId: string) => { await removeIconForPOI(poiId); if (map.value) { await initMapLibreImages(map.value); map.value.setStyle(generateMapStyle()); isPoiModalOpen.value = false; } };
-const panToUser = async () => { isTrackingUser.value = true; try { const pos = await Geolocation.getCurrentPosition({ enableHighAccuracy: true, timeout: 5000 }); if (pos && map.value) { map.value.easeTo({ center: [pos.coords.longitude, pos.coords.latitude], zoom: 17.5 }); } } catch (e) { console.warn("GPS timeout", e); } if (displayLocation.value && map.value) updateCameraToUser(true); };
+const onPoiIconChange = async (poiId: string) => { const success = await changeIconForPOI(poiId); if (success && map.value) { applyMapStyle(); isPoiModalOpen.value = false; } };
+const onPoiIconRemove = async (poiId: string) => { await removeIconForPOI(poiId); if (map.value) { applyMapStyle(); isPoiModalOpen.value = false; } };
+const panToUser = async () => { isTrackingUser.value = true; if (displayLocation.value && map.value) { updateCameraToUser(true); return; } try { const pos = await Geolocation.getCurrentPosition({ enableHighAccuracy: true, timeout: 5000 }); if (pos && map.value) { rawLocation.value = { lat: pos.coords.latitude, lon: pos.coords.longitude }; displayLocation.value = rawLocation.value; map.value.easeTo({ center: [pos.coords.longitude, pos.coords.latitude], zoom: 17.5 }); } } catch (e) { console.warn("GPS timeout", e); } };
 const swapRoutes = () => { const temp = routeA.value; routeA.value = routeB.value; routeB.value = temp; updateRouteMarkers(); if (routeA.value && routeB.value) calculateRoute(); };
-const clearRoute = () => { routeA.value = null; routeB.value = null; routeTextA.value = ''; routeTextB.value = ''; routeInfo.value = null; currentRouteGeoJSON.value = null; isNavigating.value = false; if (map.value?.getSource('route')) (map.value.getSource('route') as any).setData({ type: 'FeatureCollection', features: [] }); updateRouteMarkers(); };
-const updateRouteMode = (mode: string | number | undefined) => { if (!mode) return; const modeValue = String(mode); if (!['car', 'bus', 'bicycle', 'walk'].includes(modeValue)) return; routeMode.value = modeValue as 'car' | 'bus' | 'bicycle' | 'walk'; if (routeA.value && routeB.value) calculateRoute(false); };
+const clearRoute = () => { routeA.value = null; routeB.value = null; routeTextA.value = ''; routeTextB.value = ''; routeInfo.value = null; routeError.value = null; currentRouteGeoJSON.value = null; isNavigating.value = false; routeSteps.value = []; currentStepIndex.value = 0; navRemainingDistance.value = 0; navRemainingTime.value = 0; stepDistanceRemaining.value = 0; routeCumDist = []; routeTotalDistance.value = 0; routeTotalDuration.value = 0; if (map.value?.getSource('route')) (map.value.getSource('route') as any).setData({ type: 'FeatureCollection', features: [] }); updateRouteMarkers(); };
+// Пересчёт маршрута при смене режима делает watch(routeMode) — здесь только меняем значение,
+// иначе запрос к API уходил дважды
+const updateRouteMode = (mode: string | number | undefined) => { if (!mode) return; const modeValue = String(mode); if (!['car', 'bus', 'bicycle', 'walk'].includes(modeValue)) return; routeMode.value = modeValue as 'car' | 'bus' | 'bicycle' | 'walk'; };
 const onPointSelected = async (field: 'A' | 'B', lat: number, lon: number) => { if (field === 'A') { routeA.value = { lat, lon }; } else { routeB.value = { lat, lon }; if (!routeA.value && rawLocation.value) { routeA.value = { ...rawLocation.value }; routeTextA.value = 'Моё местоположение'; } } updateRouteMarkers(); map.value?.flyTo({ center: [lon, lat], zoom: 16 }); isTrackingUser.value = false; if (routeA.value && routeB.value) calculateRoute(); };
 const routeTo = async (lat: number, lon: number, name: string) => { isPoiModalOpen.value = false; routeB.value = { lat, lon }; routeTextB.value = name; if (!routeA.value && rawLocation.value) { routeA.value = { ...rawLocation.value }; routeTextA.value = 'Моё местоположение'; } updateRouteMarkers(); calculateRoute(); };
 const createUserMarkerElement = () => { const el = document.createElement('div'); el.className = 'user-marker'; if (userIconPath.value) { const img = document.createElement('img'); img.src = userIconPath.value; img.style.width = '48px'; img.style.height = '48px'; img.style.objectFit = 'contain'; img.style.filter = 'drop-shadow(0 4px 6px rgba(0, 0, 0, 0.4))'; el.appendChild(img); } else { el.innerHTML = `<div class="pulse-ring"></div><svg width="36" height="36" viewBox="0 0 32 32" xmlns="http://www.w3.org/2000/svg" style="position: relative; z-index: 2;"><path d="M16 2L30 30L16 22L2 30L16 2Z" fill="#3880ff" stroke="white" stroke-width="2" stroke-linejoin="round"/></svg>`; el.style.display = 'flex'; el.style.alignItems = 'center'; el.style.justifyContent = 'center'; el.style.filter = 'drop-shadow(0 4px 6px rgba(0, 0, 0, 0.4))'; } return el; };

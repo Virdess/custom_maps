@@ -22,8 +22,14 @@ export function useGeolocation() {
     }
   };
 
+  let compassListenersAttached = false;
   const startCompassListener = () => {
+    if (compassListenersAttached) return;
+    compassListenersAttached = true;
+
     window.addEventListener('deviceorientationabsolute', (event: any) => {
+      // В движении курс берём из GPS, компас (ориентация телефона) не должен его перебивать
+      if (currentSpeed.value > 10) return;
       if (event.alpha !== null) {
         updateHeadingSmoothly(360 - event.alpha);
         isCompassActive.value = true;
@@ -31,6 +37,7 @@ export function useGeolocation() {
     }, true);
 
     window.addEventListener('deviceorientation', (event: any) => {
+      if (currentSpeed.value > 10) return;
       if (event.webkitCompassHeading !== undefined && event.webkitCompassHeading !== null) {
         updateHeadingSmoothly(event.webkitCompassHeading);
         isCompassActive.value = true;
@@ -66,7 +73,10 @@ export function useGeolocation() {
     return { ...coords, distanceToRoute: minDistance };
   };
 
-  const startTracking = async (activeRouteGeoJSON: any, isNavigating: boolean, onRerouteNeeded: () => void, onLocationUpdate: () => void) => {
+  // ВАЖНО: принимаем геттеры, а не значения. Раньше сюда передавались снимки
+  // (null-маршрут и isNavigating=false на момент загрузки карты), из-за чего
+  // привязка к маршруту и rerouting никогда не срабатывали во время навигации.
+  const startTracking = async (getActiveRoute: () => any, getIsNavigating: () => boolean, onRerouteNeeded: () => void, onLocationUpdate: () => void) => {
     const permissions = await Geolocation.checkPermissions();
     if (permissions.location !== 'granted') {
       const req = await Geolocation.requestPermissions();
@@ -75,13 +85,13 @@ export function useGeolocation() {
 
     initCompass();
 
-    // ИСПРАВЛЕНИЕ 1: Обязательный пинг координат для старта.
+    // Обязательный пинг координат для старта.
     // Если устройство лежит на столе (не двигается), watchPosition никогда не сработает!
     try {
       const pos = await Geolocation.getCurrentPosition({ enableHighAccuracy: true });
       if (pos) {
         rawLocation.value = { lat: pos.coords.latitude, lon: pos.coords.longitude };
-        if (pos.coords.heading !== null) userHeading.value = pos.coords.heading;
+        if (pos.coords.heading !== null && !Number.isNaN(pos.coords.heading)) userHeading.value = pos.coords.heading;
         displayLocation.value = rawLocation.value;
         onLocationUpdate();
       }
@@ -99,15 +109,17 @@ export function useGeolocation() {
 
       const rawLat = pos.coords.latitude;
       const rawLon = pos.coords.longitude;
-      
+
       currentSpeed.value = Math.round((pos.coords.speed || 0) * 3.6);
       rawLocation.value = { lat: rawLat, lon: rawLon };
 
-      if (!isCompassActive.value && pos.coords.heading !== null && currentSpeed.value > 5) {
+      // В движении GPS-курс надёжнее компаса (телефон может лежать как угодно)
+      if (pos.coords.heading !== null && !Number.isNaN(pos.coords.heading) && currentSpeed.value > 5) {
         updateHeadingSmoothly(pos.coords.heading);
       }
 
-      if (isNavigating && activeRouteGeoJSON) {
+      const activeRouteGeoJSON = getActiveRoute();
+      if (getIsNavigating() && activeRouteGeoJSON) {
         const snapped = snapToRoute({ lat: rawLat, lon: rawLon }, activeRouteGeoJSON);
         displayLocation.value = { lat: snapped.lat, lon: snapped.lon };
         if (snapped.distanceToRoute && snapped.distanceToRoute > 40) onRerouteNeeded();
