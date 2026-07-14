@@ -71,7 +71,7 @@ const presets: Record<string, any> = {
     highway_residential: { color: '#e5e5e5', size: 30, opacity: 100, outline: { enable: true, color: '#000000', width: 10 } },
     highway_unclassified: { color: '#b0b0b0', size: 20, opacity: 100, outline: { enable: true, color: '#000000', width: 10 } },
     highway_pedestrian: { color: '#b0b0b0', size: 15, opacity: 80, outline: { enable: true, color: '#000000', width: 5 } },
-    highway_bridge: { color: '#a0a0a0', size: 50, opacity: 0, outline: { enable: true, color: '#000000', width: 15 } },
+    highway_bridge: { color: '#a0a0a0', size: 0, opacity: 0, outline: { enable: true, color: '#000000', width: 15 } },
     route_line: { color: '#991111', size: 60, opacity: 100, outline: { enable: true, color: '#000000', width: 25 } },
     hospital: { color: '#ff3333', size: 35, opacity: 100, bg: false },
     restaurant: { color: '#ffcc00', size: 35, opacity: 100, bg: false },
@@ -89,7 +89,7 @@ const presets: Record<string, any> = {
     highway_residential: { color: '#22282d', size: 20, opacity: 100 },
     highway_unclassified: { color: '#1d2226', size: 10, opacity: 100 },
     highway_pedestrian: { color: '#171a1d', size: 10, opacity: 100 },
-    highway_bridge: { color: '#2f373f', size: 40, opacity: 0 },
+    highway_bridge: { color: '#2f373f', size: 0, opacity: 0 },
     route_line: { color: '#b624ff', size: 50, opacity: 100, glow: { enable: true, color: '#b624ff', blur: 30, opacity: 50 } },
     hospital: { color: '#ffffff', size: 30, opacity: 90, bg: false }
   },
@@ -134,7 +134,7 @@ const presets: Record<string, any> = {
     highway_residential: { color: '#aaaaaa', size: 40, opacity: 100 },
     highway_unclassified: { color: '#bbbbbb', size: 30, opacity: 100, lineStyle: 'dashed' },
     highway_pedestrian: { color: '#8b694b', size: 20, opacity: 100, lineStyle: 'dashed' },
-    highway_bridge: { color: '#999999', size: 60, opacity: 0 },
+    highway_bridge: { color: '#999999', size: 0, opacity: 0 },
     route_line: { color: '#ffcc00', size: 60, opacity: 100, lineStyle: 'dashed' },
     hospital: { color: '#ff5555', size: 50, opacity: 100, bg: true }
   }
