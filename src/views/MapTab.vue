@@ -330,7 +330,7 @@ const calculateRoute = async (fitBounds = true) => {
       return;
     }
 
-    const url = `https://api.openrouteservice.org/v2/directions/${profile}?api_key=${apiKey}&start=${routeA.value.lon},${routeA.value.lat}&end=${routeB.value.lon},${routeB.value.lat}&language=ru`;
+    const url = `https://api.heigit.org/openrouteservice/v2/directions/${profile}?api_key=${apiKey}&start=${routeA.value.lon},${routeA.value.lat}&end=${routeB.value.lon},${routeB.value.lat}&language=ru`;
 
     const res = await fetch(url);
     if (!res.ok) {
