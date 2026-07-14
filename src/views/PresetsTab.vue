@@ -105,7 +105,7 @@ const presets: Record<string, any> = {
     highway_residential: { color: '#4dbbff', size: 25, opacity: 40, glow: { enable: true, color: '#4dbbff', blur: 15, opacity: 25 } },
     highway_unclassified: { color: '#4dbbff', size: 18, opacity: 70, lineStyle: 'solid' },
     highway_pedestrian: { color: '#4dbbff', size: 12, opacity: 60, lineStyle: 'dotted' },
-    highway_bridge: { color: '#4dbbff', size: 48, opacity: 0, glow: { enable: true, color: '#4dbbff', blur: 15, opacity: 0 }, outline: { enable: true, color: '#4dbbff', width: 0 } },
+    highway_bridge: { color: '#4dbbff', size: 0, opacity: 0, glow: { enable: true, color: '#4dbbff', blur: 15, opacity: 0 }, outline: { enable: true, color: '#4dbbff', width: 0 } },
     route_line: { color: '#FFD700', size: 28, opacity: 100, glow: { enable: true, color: '#FFD700', blur: 45, opacity: 90 }, outline: { enable: true, color: '#8B6914', width: 5 } },
     hospital: { color: '#FF2B6D', size: 45, opacity: 100, bg: false, glow: { enable: true, color: '#FF2B6D', blur: 20, opacity: 60 } },
     restaurant: { color: '#FFD700', size: 42, opacity: 100, bg: false, glow: { enable: true, color: '#FFD700', blur: 15, opacity: 50 } },
