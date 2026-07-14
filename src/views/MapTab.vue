@@ -186,30 +186,36 @@ const stopNavigation = () => {
 const updateCameraToUser = (animate = true) => {
   const loc = displayLocation.value;
   if (!map.value || !loc || !isTrackingUser.value) return;
-  
-  let targetZoom = 18.5;
-  let targetPitch = globalIs3D.value ? 60 : 0;
+  const rawMap = map.value;
+
+  // NaN в bearing ломает матрицы трансформации MapLibre — карта перестаёт рисоваться
+  const bearing = Number.isFinite(userHeading.value) ? userHeading.value : 0;
+  const center: [number, number] = [loc.lon, loc.lat];
+
+  // На большие расстояния прыгаем без анимации: easeTo при высоком зуме
+  // заставляет мобильный GPU загружать тайлы вдоль всего пути и вешает карту
+  const mapCenter = rawMap.getCenter();
+  const distFromCamera = calculateDistance({ lat: mapCenter.lat, lon: mapCenter.lng }, loc);
+  const tooFar = distFromCamera > 3000;
 
   if (isNavigating.value) {
+    let targetZoom = 18.5;
+    let targetPitch = globalIs3D.value ? 60 : 0;
     if (currentSpeed.value > 60) {
-      targetZoom = 15.5; 
+      targetZoom = 15.5;
       targetPitch = globalIs3D.value ? 65 : 0;
     } else if (currentSpeed.value > 30) {
       targetZoom = 17.0;
     }
+    const options = { center, bearing, zoom: targetZoom, pitch: targetPitch };
+    if (!animate || tooFar) rawMap.jumpTo(options);
+    else rawMap.easeTo({ ...options, duration: 1000, easing: (t) => t });
   } else {
-    targetZoom = 16.5;
+    // Вне навигации только держим пользователя в центре, не трогая зум/наклон/поворот:
+    // постоянные 1-секундные easeTo с pitch и bearing перебивали жесты и «замораживали» карту
+    if (!animate || tooFar) rawMap.jumpTo({ center, zoom: 16.5 });
+    else rawMap.easeTo({ center, duration: 500 });
   }
-
-  const options = {
-    center: [loc.lon, loc.lat] as [number, number],
-    bearing: userHeading.value,
-    zoom: targetZoom,
-    pitch: targetPitch
-  };
-  
-  if (animate) map.value.easeTo({ ...options, duration: 1000, easing: (t) => t });
-  else map.value.jumpTo(options);
 };
 
 let markerAnimationId: number | null = null;
@@ -437,6 +443,14 @@ onIonViewDidEnter(async () => {
 
     const rawMap = map.value;
 
+    // Жест пользователя отключает слежение за геопозицией — иначе камера
+    // каждую секунду возвращается к маркеру и двигать карту невозможно
+    const stopFollowOnGesture = (e: any) => { if (e?.originalEvent) isTrackingUser.value = false; };
+    rawMap.on('dragstart', () => { isTrackingUser.value = false; });
+    rawMap.on('zoomstart', stopFollowOnGesture);
+    rawMap.on('rotatestart', stopFollowOnGesture);
+    rawMap.on('pitchstart', stopFollowOnGesture);
+
     rawMap.on('load', async () => {
       isLoading.value = false;
       await initMapLibreImages(rawMap);
@@ -475,7 +489,24 @@ const onUserIconChange = async () => { const success = await changeUserIcon(); i
 const onUserIconRemove = async () => { await removeUserIcon(); if (userLocationMarker.value) { userLocationMarker.value.remove(); userLocationMarker.value = null; updateUserMarker(); } };
 const onPoiIconChange = async (poiId: string) => { const success = await changeIconForPOI(poiId); if (success && map.value) { applyMapStyle(); isPoiModalOpen.value = false; } };
 const onPoiIconRemove = async (poiId: string) => { await removeIconForPOI(poiId); if (map.value) { applyMapStyle(); isPoiModalOpen.value = false; } };
-const panToUser = async () => { isTrackingUser.value = true; if (displayLocation.value && map.value) { updateCameraToUser(true); return; } try { const pos = await Geolocation.getCurrentPosition({ enableHighAccuracy: true, timeout: 5000 }); if (pos && map.value) { rawLocation.value = { lat: pos.coords.latitude, lon: pos.coords.longitude }; displayLocation.value = rawLocation.value; map.value.easeTo({ center: [pos.coords.longitude, pos.coords.latitude], zoom: 17.5 }); } } catch (e) { console.warn("GPS timeout", e); } };
+const panToUser = async () => {
+  isTrackingUser.value = true;
+  let loc = displayLocation.value;
+  if (!loc) {
+    try {
+      const pos = await Geolocation.getCurrentPosition({ enableHighAccuracy: true, timeout: 5000 });
+      rawLocation.value = { lat: pos.coords.latitude, lon: pos.coords.longitude };
+      displayLocation.value = rawLocation.value;
+      loc = rawLocation.value;
+    } catch (e) { console.warn("GPS timeout", e); return; }
+  }
+  if (!map.value || !loc) return;
+  const center = map.value.getCenter();
+  const dist = calculateDistance({ lat: center.lat, lon: center.lng }, loc);
+  // Дальний перелёт — мгновенно, иначе мобильный GPU грузит тайлы вдоль всего пути
+  if (dist > 3000) map.value.jumpTo({ center: [loc.lon, loc.lat], zoom: 16.5 });
+  else map.value.easeTo({ center: [loc.lon, loc.lat], zoom: 16.5, duration: 600 });
+};
 const swapRoutes = () => { const temp = routeA.value; routeA.value = routeB.value; routeB.value = temp; updateRouteMarkers(); if (routeA.value && routeB.value) calculateRoute(); };
 const clearRoute = () => { routeA.value = null; routeB.value = null; routeTextA.value = ''; routeTextB.value = ''; routeInfo.value = null; routeError.value = null; currentRouteGeoJSON.value = null; isNavigating.value = false; routeSteps.value = []; currentStepIndex.value = 0; navRemainingDistance.value = 0; navRemainingTime.value = 0; stepDistanceRemaining.value = 0; routeCumDist = []; routeTotalDistance.value = 0; routeTotalDuration.value = 0; if (map.value?.getSource('route')) (map.value.getSource('route') as any).setData({ type: 'FeatureCollection', features: [] }); updateRouteMarkers(); };
 // Пересчёт маршрута при смене режима делает watch(routeMode) — здесь только меняем значение,

@@ -27,7 +27,11 @@ export const calculateBearing = (from: { lat: number, lon: number }, to: { lat: 
 };
 
 // Вычисление кратчайшего пути поворота (чтобы маркер не крутился на 360 градусов)
+// NaN-защита обязательна: GPS отдаёт heading = NaN, когда устройство неподвижно,
+// а NaN в bearing карты полностью ломает отрисовку MapLibre
 export const getShortestHeading = (current: number, target: number) => {
+  if (!Number.isFinite(target)) return Number.isFinite(current) ? current : 0;
+  if (!Number.isFinite(current)) return target;
   let diff = target - (current % 360);
   if (diff > 180) diff -= 360;
   if (diff < -180) diff += 360;
