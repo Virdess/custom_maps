@@ -33,7 +33,7 @@
           :distanceRemaining="stepDistanceRemaining" 
         />
 
-        <div class="floating-status" v-if="!isNavigating">
+        <div class="floating-status" v-if="!isNavigating && (routeError || isLoading || showLoadedStatus)">
           <ion-text color="danger" v-if="routeError"><small>{{ routeError }}</small></ion-text>
           <ion-text color="primary" v-else-if="isLoading"><small>Инициализация карты...</small></ion-text>
           <ion-text color="success" v-else><small>Векторные данные загружены</small></ion-text>
@@ -131,6 +131,8 @@ const {
 // --- Состояние карты ---
 const map = shallowRef<maplibregl.Map | null>(null);
 const isLoading = ref(true);
+// Плашка "Векторные данные загружены" видна 2 секунды после инициализации
+const showLoadedStatus = ref(true);
 const isPoiModalOpen = ref(false);
 const selectedPOI = ref<POI | null>(null);
 
@@ -453,6 +455,7 @@ onIonViewDidEnter(async () => {
 
     rawMap.on('load', async () => {
       isLoading.value = false;
+      setTimeout(() => { showLoadedStatus.value = false; }, 2000);
       await initMapLibreImages(rawMap);
       restoreRouteOnMap();
       beginTracking();
